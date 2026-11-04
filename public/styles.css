@@ -449,3 +449,10 @@ input[type="search"] {
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* OpenStreetMap fallback tiles (no CARTO key): calm the colours to match the app, and darken them in dark mode. */
+.map.osm .leaflet-tile-pane { filter: saturate(.45) contrast(.95) brightness(1.03); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .map.osm .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) saturate(.35) brightness(.85) contrast(.9); }
+}
+:root[data-theme="dark"] .map.osm .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) saturate(.35) brightness(.85) contrast(.9); }

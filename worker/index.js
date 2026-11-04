@@ -29,6 +29,10 @@ export default {
           Object.entries(SOURCES).map(([id, s]) => ({ id, enabled: !s.key || !!env[s.key] }))
         );
       }
+      if (url.pathname === "/api/map") {
+        // The CARTO key is sent to the phone (map tiles load from the browser), but stays out of the repo.
+        return json({ cartoKey: env.CARTO_KEY || null });
+      }
       if (url.pathname === "/api/geocode") return json(await geocode(url.searchParams.get("q") || ""));
       if (url.pathname === "/api/stations") return await stations(url, env, ctx);
       if (url.pathname === "/api/forecast") return await forecast(url, env, ctx);

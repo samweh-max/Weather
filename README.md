@@ -55,10 +55,12 @@ Open-Meteo and yr.no need no key. The other three each need a free account:
 | Provider | Sign up | Free limit |
 | --- | --- | --- |
 | Met Office | [datahub.metoffice.gov.uk](https://datahub.metoffice.gov.uk/) → subscribe to "Site Specific" global spot, free plan | 360 calls/day |
-| AccuWeather | [developer.accuweather.com](https://developer.accuweather.com/) → create an app | about 50 calls/day |
+| AccuWeather (optional) | [developer.accuweather.com](https://developer.accuweather.com/) → create an app. Now only a 14-day trial, so it's fine to skip | trial only |
 | OpenWeather | [openweathermap.org/api](https://openweathermap.org/api) → free plan | 1,000 calls/day |
 
 Any source without a key is simply hidden in the app.
+
+**Map tiles (optional):** the Stations map uses CARTO's clean light and dark maps when you add a free key from [carto.com/basemaps/apikey](https://www.carto.com/basemaps/apikey/) (non-commercial, 5 million tiles a month) as the secret `CARTO_KEY`. Without it the map falls back to OpenStreetMap's own tiles, toned down to match the app.
 
 ## Run it on Cloudflare (free)
 

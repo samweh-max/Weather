@@ -13,6 +13,7 @@
   let lastFetch = null;
   const seen = new Map(); // station id -> station
   let opts = {};
+  let cartoKey = null;
 
   function loadLeaflet() {
     if (window.L) return Promise.resolve();
@@ -37,8 +38,15 @@
     document.documentElement.dataset.theme === "dark" ||
     (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
 
+  // CARTO's base maps need a free key (CARTO_KEY). Without one, fall back to OpenStreetMap's own tiles.
   function baseUrl() {
-    return `https://{s}.basemaps.cartocdn.com/${dark() ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`;
+    if (cartoKey) return `https://{s}.basemaps.cartocdn.com/${dark() ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(cartoKey)}`;
+    return "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+  }
+
+  function baseAttribution() {
+    const osm = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>';
+    return cartoKey ? osm + ' &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>' : osm;
   }
 
   // Colour for a temperature, cold blue through to hot orange.
@@ -209,10 +217,9 @@
         L.geoJSON(window.DEMO_LAND, { interactive: false, style: { className: "land", weight: 1 } }).addTo(map);
         map.attributionControl.addAttribution("Coastlines: Natural Earth");
       } else {
-        base = L.tileLayer(baseUrl(), {
-          subdomains: "abcd", maxZoom: 18,
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>',
-        }).addTo(map);
+        try { cartoKey = (await opts.api("/api/map")).cartoKey || null; } catch { cartoKey = null; }
+        el.classList.toggle("osm", !cartoKey);
+        base = L.tileLayer(baseUrl(), { subdomains: "abcd", maxZoom: cartoKey ? 18 : 19, attribution: baseAttribution() }).addTo(map);
         matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => base.setUrl(baseUrl()));
       }
       stationLayer = L.layerGroup().addTo(map);
