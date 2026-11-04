@@ -1,0 +1,8 @@
+# Copy to .dev.vars for local testing with `npm run dev`. Never commit .dev.vars.
+METOFFICE_KEY=
+ACCUWEATHER_KEY=
+OPENWEATHER_KEY=
+METOFFICE_OBS_KEY=
+NETATMO_CLIENT_ID=
+NETATMO_CLIENT_SECRET=
+NETATMO_REFRESH_TOKEN=

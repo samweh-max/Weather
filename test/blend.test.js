@@ -1,0 +1,97 @@
+// The blending maths, with small made-up sources.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import "../public/blend.js";
+const { predict, scoreSkill, snapshot } = globalThis.Blend;
+
+const nowKey = "2026-11-04T12:00";
+function src(id, temp, extra = {}) {
+  const hours = [];
+  for (let i = -2; i < 30; i++) {
+    const t = new Date(Date.parse("2026-11-04T12:00:00Z") + i * 3600e3).toISOString().slice(0, 16);
+    hours.push({ time: t, temp, wind: 20, gust: 30, dir: 270, pop: extra.pop ?? 10, mm: 0, code: extra.code ?? "partly" });
+  }
+  const days = [{ date: "2026-11-04", hi: temp + 2, lo: temp - 4, pop: extra.pop ?? 10, mm: 0, wind: 20, gust: 30, dir: 270, code: extra.code ?? "partly" },
+                { date: "2026-11-05", hi: temp + 1, lo: temp - 5, pop: 60, mm: 3, wind: 30, gust: 50, dir: 200, code: "rain" }];
+  return { id, name: id, ok: true, hours, days };
+}
+const station = (temp, extra = {}) => ({ network: "airport", dist: 5, time: new Date().toISOString(), temp, wind: 20, dir: 270, raining: false, ...extra });
+
+test("with no stations, sources count equally", () => {
+  const r = predict({ providers: [src("a", 10), src("b", 14)], stations: [], nowKey });
+  assert.equal(r.basis, "equal");
+  assert.equal(Math.round(r.hours[0].temp), 12);
+  assert.equal(r.hours[0].lo, 10);
+  assert.equal(r.hours[0].hi, 14);
+});
+
+test("the source closest to what stations read now gets more weight, and hour 0 matches the stations", () => {
+  const r = predict({ providers: [src("a", 10), src("b", 14)], stations: [station(10)], nowKey });
+  assert.equal(r.basis, "now");
+  assert.equal(r.weights[0].id, "a");
+  assert.ok(r.weights[0].w > 0.8);
+  assert.ok(Math.abs(r.hours[0].temp - 10) < 0.01, "hour 0 is pulled to the observed temperature");
+  assert.ok(r.hours[20].temp > r.hours[0].temp, "the nudge fades later");
+});
+
+test("stations reporting rain raise the chance of rain in the next hours", () => {
+  const st = [station(10, { raining: true }), station(10, { raining: true, dist: 9 }), station(10, { raining: false, dist: 12 })];
+  const r = predict({ providers: [src("a", 10), src("b", 10)], stations: st, nowKey });
+  assert.equal(r.now.rain, "raining");
+  assert.ok(r.hours[0].pop >= 80);
+  assert.ok(r.hours[10].pop < 20);
+});
+
+test("past accuracy beats a single reading when there is enough history", () => {
+  const providers = [src("a", 10), src("b", 14)];
+  const snaps = [];
+  const history = [];
+  for (let i = 0; i < 12; i++) {
+    const issued = new Date(Date.parse("2026-11-03T12:00:00Z") + i * 3600e3).toISOString().slice(0, 16);
+    const target = new Date(Date.parse(issued + ":00Z") + 4 * 3600e3).toISOString().slice(0, 13);
+    snaps.push({ issued, f: { a: { [target]: 10 }, b: { [target]: 14 } } });
+    history.push({ key: target + ":00", temp: 14 });
+  }
+  const skill = scoreSkill(snaps, history);
+  assert.equal(skill.b.mae, 0);
+  assert.equal(skill.a.mae, 4);
+  const r = predict({ providers, stations: [], nowKey, skill });
+  assert.equal(r.basis, "past");
+  assert.equal(r.weights[0].id, "b");
+});
+
+test("daily blend and confidence", () => {
+  const r = predict({ providers: [src("a", 10), src("b", 10.5)], stations: [], nowKey });
+  assert.equal(r.days.length, 2);
+  assert.equal(r.days[1].code, "rain");
+  assert.equal(r.days[0].confidence, "high");
+  const r2 = predict({ providers: [src("a", 6), src("b", 14)], stations: [], nowKey });
+  assert.equal(r2.days[0].confidence, "low");
+});
+
+test("snapshot keeps the next 24 hours, every 2 hours", () => {
+  const s = snapshot([src("a", 10)], nowKey);
+  assert.equal(s.issued, "2026-11-04T12:00");
+  assert.equal(Object.keys(s.f.a).length, 12);
+});
+
+test("a source that always runs warm here is corrected, not just down-weighted", () => {
+  const snaps = [], history = [];
+  for (let i = 0; i < 12; i++) {
+    const issued = new Date(Date.parse("2026-11-03T12:00:00Z") + i * 3600e3).toISOString().slice(0, 16);
+    const target = new Date(Date.parse(issued + ":00Z") + 4 * 3600e3).toISOString().slice(0, 13);
+    snaps.push({ issued, f: { a: { [target]: 13 }, b: { [target]: 13 } } });
+    history.push({ key: target + ":00", temp: 10 });
+  }
+  const skill = scoreSkill(snaps, history);
+  assert.equal(skill.a.bias, 3);
+  const r = predict({ providers: [src("a", 13), src("b", 13)], stations: [], nowKey, skill });
+  assert.ok(Math.abs(r.hours[5].temp - 10) < 0.01, "both sources are 3° warm here, so the blend says 10°");
+  assert.ok(Math.abs(r.days[0].hi - 12) < 0.01);
+});
+
+test("stations on a hill are shifted to the place's height", () => {
+  const hill = { network: "airport", dist: 5, time: new Date().toISOString(), temp: 8, elev: 310 };
+  const r = predict({ providers: [src("a", 10)], stations: [hill], nowKey, placeElev: 10 });
+  assert.ok(Math.abs(r.now.obs.temp - 9.95) < 0.01);
+});

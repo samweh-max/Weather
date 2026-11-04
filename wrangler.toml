@@ -1,0 +1,23 @@
+name = "weather-compare"
+main = "worker/index.js"
+compatibility_date = "2025-09-01"
+
+# The phone app (HTML/CSS/JS) is served from ./public; /api/* goes to the worker.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+
+[vars]
+# MET Norway asks every app to identify itself. Put your repo URL or email here.
+CONTACT = "https://github.com/samweh-max"
+
+# API keys are secrets, never put them in this file. Set them with:
+#   npx wrangler secret put METOFFICE_KEY
+#   npx wrangler secret put ACCUWEATHER_KEY
+#   npx wrangler secret put OPENWEATHER_KEY
+
+# Optional: lets the worker keep Netatmo's refreshed sign-in token.
+# [[kv_namespaces]]
+# binding = "TOKENS"
+# id = "<from: npx wrangler kv namespace create TOKENS>"
