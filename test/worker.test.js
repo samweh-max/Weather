@@ -131,6 +131,11 @@ test("sources lists which providers have keys", async () => {
   assert.deepEqual(body.find((s) => s.id === "openmeteo"), { id: "openmeteo", enabled: true });
 });
 
+test("map key is passed on only when set", async () => {
+  assert.equal((await call("/api/map", {})).body.cartoKey, null);
+  assert.equal((await call("/api/map", { CARTO_KEY: "k" })).body.cartoKey, "k");
+});
+
 test("keyed source without a key is refused", async () => {
   const { status } = await call(q("accuweather"), {});
   assert.equal(status, 400);
