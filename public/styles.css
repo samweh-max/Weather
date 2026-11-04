@@ -175,13 +175,34 @@ svg { display: block; }
 .mini .mw { margin-left: auto; display: flex; align-items: center; gap: 4px; font-weight: 600; font-size: 14px; white-space: nowrap; flex: none; }
 .mini .mw svg { width: 13px; height: 13px; }
 
-/* Spread of highs: one dot per source on a shared scale. */
-.spread { margin-top: 14px; }
-.spread .lbl { display: flex; justify-content: space-between; font-size: 12px; opacity: 0.88; }
-.spread .axis { position: relative; height: 18px; margin: 4px 5px 0; }
-.spread .axis::before { content: ""; position: absolute; left: -5px; right: -5px; top: 8px; height: 2px; border-radius: 1px; background: rgba(255, 255, 255, 0.3); }
-.spread .dot { position: absolute; top: 4px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px rgba(10, 20, 30, 0.18); }
-.spread .med { position: absolute; top: 0; width: 2px; height: 18px; margin-left: -1px; background: #fff; border-radius: 1px; }
+/* Sunrise to sunset across the day, midnight to midnight. */
+.sun { margin-top: 16px; }
+.sun-track { position: relative; height: 8px; margin: 0 7px; border-radius: 4px;
+  background: linear-gradient(90deg,
+    rgba(12, 20, 48, 0.55) 0%,
+    rgba(12, 20, 48, 0.55) calc(var(--a) - 6%),
+    rgba(255, 140, 90, 0.75) var(--a),
+    rgba(255, 140, 90, 0.75) var(--b),
+    rgba(12, 20, 48, 0.55) calc(var(--b) + 6%),
+    rgba(12, 20, 48, 0.55) 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.sun-day { position: absolute; top: 0; bottom: 0; left: var(--a); width: calc(var(--b) - var(--a)); border-radius: 4px;
+  background: linear-gradient(90deg, #ff9a6b, #ffd36e 30%, #fff1b8 50%, #ffd36e 70%, #ff8f7a);
+  box-shadow: 0 0 12px rgba(255, 205, 110, 0.55); }
+.sun-now { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; }
+.sun-now.up { background: radial-gradient(circle at 40% 40%, #fffbe6, #ffd23f 60%, #ffb21a);
+  box-shadow: 0 0 0 3px rgba(255, 214, 80, 0.3), 0 0 14px 4px rgba(255, 200, 60, 0.6); animation: sunpulse 3s ease-in-out infinite; }
+.sun-now.down { background: radial-gradient(circle at 35% 35%, #fff, #dfe6f5 70%, #b9c3da);
+  box-shadow: 0 0 0 3px rgba(220, 230, 255, 0.18), 0 0 10px 2px rgba(200, 215, 255, 0.45); }
+@keyframes sunpulse { 50% { box-shadow: 0 0 0 5px rgba(255, 214, 80, 0.18), 0 0 18px 6px rgba(255, 200, 60, 0.5); } }
+.sun-lbl { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.sun-lbl > span { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.sun-lbl .len { font-weight: 400; opacity: 0.8; text-align: center; }
+.sun-lbl svg { width: 16px; height: 16px; flex: none; }
+.sun-lbl.one { justify-content: center; opacity: 0.88; }
+.conf-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: -4px 0 10px; font-size: 12px; color: var(--muted); }
+.conf-key .conf { margin: 0 5px 0 0; vertical-align: 1px; }
+@media (prefers-reduced-motion: reduce) { .sun-now.up { animation: none; } }
 
 /* ---------- Day rail ---------- */
 .days {
@@ -487,7 +508,6 @@ button.drow.open .dl { color: var(--rain); }
 .dgrid b { font-size: 14px; font-weight: 600; line-height: 1.35; }
 
 /* "How high will it get?" strip: name the two ends instead of a dash */
-.spread .ends { display: flex; justify-content: space-between; font-size: 12px; opacity: 0.88; margin-top: 2px; }
 
 /* Rain gauges: totals and a 24-hour timeline */
 button.srow { width: 100%; font: inherit; color: inherit; text-align: left; background: none; border: 0; border-top: 1px solid var(--line); cursor: pointer; -webkit-tap-highlight-color: transparent; }
