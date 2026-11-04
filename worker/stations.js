@@ -163,20 +163,41 @@ async function rainGauges(lat, lon) {
 
 const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
 
+// Turn a geohash into the latitude and longitude of its centre.
+export function geohashCentre(hash) {
+  const B32 = "0123456789bcdefghjkmnpqrstuvwxyz";
+  let even = true, la = [-90, 90], lo = [-180, 180];
+  for (const ch of String(hash).toLowerCase()) {
+    const v = B32.indexOf(ch);
+    if (v < 0) return null;
+    for (let b = 4; b >= 0; b--) {
+      const r = even ? lo : la, bit = (v >> b) & 1, mid = (r[0] + r[1]) / 2;
+      r[bit ? 0 : 1] = mid;
+      even = !even;
+    }
+  }
+  return { lat: (la[0] + la[1]) / 2, lon: (lo[0] + lo[1]) / 2 };
+}
+
+// Observation times may come as ISO text or as Unix seconds.
+const obsMs = (t) => (typeof t === "number" || /^\d+$/.test(String(t)) ? Number(t) * (Number(t) < 1e12 ? 1000 : 1) : Date.parse(t));
+
 async function metOfficeObs(lat, lon, env) {
   const base = "https://data.hub.api.metoffice.gov.uk/observation-land/1";
   const opts = { headers: { apikey: env.METOFFICE_OBS_KEY || env.METOFFICE_KEY, accept: "application/json" } };
-  const near = await getJson(`${base}/nearest?lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}`, opts);
+  const near = await getJson(`${base}/nearest?lat=${lat.toFixed(2)}&lon=${lon.toFixed(2)}`, opts);
   const site = Array.isArray(near) ? near[0] : near?.features?.[0]?.properties || near;
   if (!site || !site.geohash) return { stations: [] };
   const obs = await getJson(`${base}/${site.geohash}`, opts);
-  const rows = (Array.isArray(obs) ? obs : obs?.observations || []).filter((o) => o && o.datetime);
-  rows.sort((a, b) => String(b.datetime).localeCompare(String(a.datetime)));
+  const rows = (Array.isArray(obs) ? obs : obs?.observations || []).filter((o) => o && o.datetime != null && !isNaN(obsMs(o.datetime)));
+  rows.sort((a, b) => obsMs(b.datetime) - obsMs(a.datetime));
   const o = rows[0];
   if (!o) return { stations: [] };
   const dir = typeof o.wind_direction === "number" ? o.wind_direction : COMPASS.indexOf(o.wind_direction) >= 0 ? COMPASS.indexOf(o.wind_direction) * 22.5 : null;
-  const sLat = num(site.latitude ?? site.lat);
-  const sLon = num(site.longitude ?? site.lon);
+  // The nearest-station reply has no coordinates, only a geohash, so place the station from that.
+  const centre = geohashCentre(site.geohash);
+  const sLat = num(site.latitude ?? site.lat ?? centre?.lat);
+  const sLon = num(site.longitude ?? site.lon ?? centre?.lon);
   return {
     stations: [{
       id: `MO-${site.geohash}`,
@@ -184,7 +205,7 @@ async function metOfficeObs(lat, lon, env) {
       name: site.area || site.name || "Met Office station",
       lat: sLat, lon: sLon,
       dist: sLat != null && sLon != null ? round(distKm(lat, lon, sLat, sLon), 1) : 0,
-      time: new Date(o.datetime).toISOString(),
+      time: new Date(obsMs(o.datetime)).toISOString(),
       temp: num(o.temperature),
       humidity: num(o.humidity),
       // DataHub reports wind in knots.
