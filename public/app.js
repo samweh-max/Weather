@@ -354,6 +354,64 @@ function dayLabel(date, i) {
   if (date === placeToday()) return "Today";
   return new Date(date + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" });
 }
+// ---------- Sunrise and sunset ----------
+
+// Sunrise and sunset for a date at a place (standard solar formulas, accurate to about a minute).
+function sunTimes(date, lat, lon) {
+  const rad = Math.PI / 180, e = rad * 23.4397, J0 = 0.0009;
+  const noonUtc = Date.parse(date + "T12:00:00Z") - (lon / 15) * 3600e3;
+  const d = noonUtc / 864e5 - 0.5 + 2440588 - 2451545;
+  const lw = -lon * rad, phi = lat * rad;
+  const n = Math.round(d - J0 - lw / (2 * Math.PI));
+  const ds = J0 + lw / (2 * Math.PI) + n;
+  const M = rad * (357.5291 + 0.98560028 * ds);
+  const C = rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+  const L = M + C + rad * 102.9372 + Math.PI;
+  const dec = Math.asin(Math.sin(L) * Math.sin(e));
+  const jNoon = 2451545 + ds + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+  const cosW = (Math.sin(-0.833 * rad) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
+  const fromJ = (j) => new Date((j + 0.5 - 2440588) * 864e5);
+  if (cosW > 1) return { polar: "night" };
+  if (cosW < -1) return { polar: "day" };
+  const w = Math.acos(cosW);
+  const jSet = 2451545 + J0 + (w + lw) / (2 * Math.PI) + n + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+  return { rise: fromJ(jNoon - (jSet - jNoon)), set: fromJ(jSet) };
+}
+
+// Minutes since local midnight at the place, and HH:MM, for a moment in time.
+function placeClock(t) {
+  try {
+    const [h, m] = new Intl.DateTimeFormat("en-GB", { timeZone: state.place.tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(t).split(":").map(Number);
+    return { mins: h * 60 + m, text: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}` };
+  } catch {
+    return { mins: t.getHours() * 60 + t.getMinutes(), text: t.toTimeString().slice(0, 5) };
+  }
+}
+
+const SUN_UP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h16M7 14a5 5 0 0 1 10 0M12 4v4M9.5 6.5 12 4l2.5 2.5M4.9 9.9l1.4 1.4M19.1 9.9l-1.4 1.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const SUN_DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h16M7 14a5 5 0 0 1 10 0M12 3.5v4.5M9.5 5.5 12 8l2.5-2.5M4.9 9.9l1.4 1.4M19.1 9.9l-1.4 1.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+// A day-long strip from midnight to midnight: night, the glow of sunrise, daylight, sunset, night.
+// On today it also shows where the sun is right now.
+function sunBar(date) {
+  if (!state.place || !date) return "";
+  const t = sunTimes(date, state.place.lat, state.place.lon);
+  if (t.polar) return `<div class="sun"><div class="sun-lbl one">${t.polar === "day" ? "The sun doesn't set today" : "The sun doesn't rise today"}</div></div>`;
+  const r = placeClock(t.rise), st = placeClock(t.set);
+  const a = (r.mins / 1440) * 100, b = (st.mins / 1440) * 100;
+  const len = st.mins - r.mins;
+  let dot = "";
+  if (date === placeToday()) {
+    const now = placeClock(new Date()).mins;
+    const up = now > r.mins && now < st.mins;
+    dot = `<span class="sun-now ${up ? "up" : "down"}" style="left:${((now / 1440) * 100).toFixed(1)}%" title="Now"></span>`;
+  }
+  return `<div class="sun" aria-label="Sunrise ${r.text}, sunset ${st.text}">
+      <div class="sun-track" style="--a:${a.toFixed(1)}%;--b:${b.toFixed(1)}%"><span class="sun-day"></span>${dot}</div>
+      <div class="sun-lbl"><span>${SUN_UP}${r.text}</span><span class="len">${Math.floor(len / 60)} h ${len % 60} min of daylight</span><span>${st.text}${SUN_DOWN}</span></div>
+    </div>`;
+}
+
 function longDate(date) {
   return new Date(date + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
 }
@@ -385,10 +443,6 @@ function renderHero(date, c) {
   const windVal = c.wind != null ? `${windArrow(c.dir, "")}<span>${fmt.windNum(c.wind)} <small style="font-size:12px;font-weight:500">${fmt.windUnit()}</small></span>` : "–";
   const windSub = [compass(c.dir), c.gust != null ? `gusts ${fmt.windNum(c.gust)}` : null].filter(Boolean).join(" · ");
 
-  const span = Math.max(c.hiMax - c.hiMin, 0.1);
-  const pad = Math.max(span * 0.15, 0.5);
-  const pos = (t) => (((t - (c.hiMin - pad)) / (span + 2 * pad)) * 100).toFixed(1);
-  const dots = c.his.map((h) => `<span class="dot" style="left:${pos(h)}%"></span>`).join("");
 
   hero.innerHTML = `
     <div class="when">${today ? "Today" : dayLabel(date, state.day)} · ${longDate(date).replace(/^\w+ /, "")}</div>
@@ -405,11 +459,7 @@ function renderHero(date, c) {
       <div class="stat"><div class="k">Wind</div><div class="v">${windVal}</div><div class="s">${windSub || "&nbsp;"}</div></div>
       <div class="stat"><div class="k">Agreement</div><div class="v">${agree[0]}</div><div class="s">${agree[1]}</div></div>
     </div>
-    <div class="spread" aria-label="Highs forecast by each source, from ${fmt.temp(c.hiMin)} to ${fmt.temp(c.hiMax)}">
-      <div class="lbl"><span>How high will it get? Each dot is one source</span></div>
-      <div class="axis">${dots}<span class="med" style="left:${pos(c.hi)}%"></span></div>
-      <div class="ends"><span>Coolest ${fmt.temp(c.hiMin)}</span><span>Warmest ${fmt.temp(c.hiMax)}</span></div>
-    </div>`;
+    ${sunBar(date)}`;
 }
 
 function renderDays(ds) {
@@ -930,7 +980,7 @@ function renderForecastPage() {
   box.innerHTML = `
     <section class="panel"><h2>Next 24 hours</h2>${hourChart(pred.hours.slice(0, 24))}
       <div class="legend"><span><i style="background:var(--warm);opacity:.5"></i>Temperature</span><span><i style="background:var(--rain)"></i>Chance of rain</span><span><i style="background:var(--wind)"></i>Wind, ${fmt.windUnit()}</span></div></section>
-    <section class="panel"><h2>Next 7 days</h2>${drows}</section>
+    <section class="panel"><h2>Next 7 days</h2><div class="conf-key"><span><i class="conf high"></i>High</span><span><i class="conf medium"></i>Medium</span><span><i class="conf low"></i>Low confidence</span></div>${drows}</section>
     <section class="panel notes"><h2>Forecaster's notes</h2>${notes}
       <div class="byline">Worked out on this phone from ${pred.weights.length} forecasts and ${(state.stations?.stations || []).length} live stations.</div></section>
     <section class="panel"><h2>How this forecast is made</h2><p class="how">Tailored to <b>${esc(state.place.gps ? "where you are" : state.place.name)}</b>${placeElev() != null ? ` (${Math.round(placeElev())} m above sea level)` : ""}, using stations within ${fmt.dist(40)}. Closer stations count more, and readings from higher or lower stations are corrected for height.</p><p class="how">${basisText}</p>${nowText}${wrows}</section>`;
