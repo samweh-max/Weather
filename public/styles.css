@@ -477,3 +477,27 @@ button.srow { width: 100%; font: inherit; color: inherit; text-align: left; back
 .rainline .gap { fill: var(--line); }
 .pop .chart { margin-top: 8px; }
 .pop .how { font-size: 11px; margin: 4px 0 0; }
+
+/* Page changes: the content slides in the direction of travel, the sky panel morphs size, the tab bar stays put. */
+#main { view-transition-name: page; }
+.sky { view-transition-name: sky; }
+.tabs { view-transition-name: tabs; }
+::view-transition-group(*) { animation-duration: 0.38s; animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
+::view-transition-old(page) { animation: page-out 0.24s cubic-bezier(0.4, 0, 1, 1) both; }
+::view-transition-new(page) { animation: page-in 0.38s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+/* The sky keeps its natural size and is clipped as it grows or shrinks, so its text never stretches. */
+::view-transition-group(sky) { overflow: hidden; border-radius: 0 0 22px 22px; }
+::view-transition-old(sky), ::view-transition-new(sky) { height: auto; width: 100%; object-fit: none; object-position: top; }
+::view-transition-old(sky) { animation: fade-out 0.18s ease-in both; }
+::view-transition-new(sky) { animation: fade-in 0.3s 0.06s ease-out both; }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes page-out { to { opacity: 0; transform: translateX(calc(var(--dx) * -1)) scale(0.985); } }
+@keyframes page-in { from { opacity: 0; transform: translateX(var(--dx)) scale(0.985); } }
+:root { --dx: 36px; }
+:root[data-dir="back"] { --dx: -36px; }
+/* Browsers without view transitions still get the slide in. */
+#main.page-in { animation: page-in 0.38s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}

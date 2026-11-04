@@ -703,10 +703,31 @@ function goPage(p) {
   try {
     if (location.hash.replace("#", "") !== p) history.replaceState(null, "", p === "compare" ? location.pathname + location.search : "#" + p);
   } catch {}
-  state.page = p;
-  state.open = null;
-  render();
-  window.scrollTo({ top: 0 });
+  switchPage(p, () => { state.open = null; });
+}
+
+// Slide between pages: forward pages come in from the right, earlier ones from the left.
+// The sky panel morphs between its full and slim sizes while the page content slides.
+function switchPage(p, before) {
+  const from = PAGES.indexOf(state.page), to = PAGES.indexOf(p);
+  const swap = () => {
+    if (before) before();
+    state.page = p;
+    render();
+    window.scrollTo({ top: 0 });
+  };
+  const still = from === to || matchMedia("(prefers-reduced-motion: reduce)").matches;
+  document.documentElement.dataset.dir = to > from ? "fwd" : "back";
+  if (still) return swap();
+  if (document.startViewTransition) {
+    document.startViewTransition(swap);
+  } else {
+    swap();
+    const m = $("#main");
+    m.classList.remove("page-in");
+    void m.offsetWidth;
+    m.classList.add("page-in");
+  }
 }
 
 // ---------- Stations data and the Forecaster ----------
@@ -1351,7 +1372,7 @@ function init() {
   $("#gpsBtn").onclick = useGps;
   $("#search").oninput = onSearch;
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => goPage(b.dataset.page)));
-  window.addEventListener("hashchange", () => { state.page = pageFromHash(); render(); });
+  window.addEventListener("hashchange", () => switchPage(pageFromHash()));
   state.page = pageFromHash();
   document.querySelectorAll("#modes button").forEach((b) => (b.onclick = () => {
     state.mode = b.dataset.mode;
