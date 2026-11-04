@@ -92,11 +92,12 @@
     if (s.humidity != null) rows.push(["Humidity", Math.round(s.humidity) + "%"]);
     if (s.wind != null) rows.push(["Wind", `${f.windNum(s.wind)} ${f.windUnit()}${s.dir != null ? " from " + opts.compass(s.dir) : ""}${s.gust != null ? ", gusts " + f.windNum(s.gust) : ""}`]);
     if (s.rain1h != null) rows.push(["Rain, last hour", f.rain(s.rain1h)]);
+    if (s.rain24h != null) rows.push(["Rain, last 24 hours", f.rain(s.rain24h)]);
     else if (s.wx) rows.push(["Weather", s.wx]);
     else if (s.raining != null) rows.push(["Rain", s.raining ? "yes" : "dry"]);
     if (s.pressure != null) rows.push(["Pressure", Math.round(s.pressure) + " hPa"]);
     return `<div class="pop"><b>${opts.esc(s.name)}</b><small>${net}${s.time ? " · " + opts.ago(s.time) : ""}</small>
-      <table>${rows.map(([k, v]) => `<tr><td>${k}</td><td>${opts.esc(v)}</td></tr>`).join("")}</table></div>`;
+      <table>${rows.map(([k, v]) => `<tr><td>${k}</td><td>${opts.esc(v)}</td></tr>`).join("")}</table>${s.hourly && opts.timeline ? opts.timeline(s.hourly) : ""}</div>`;
   }
 
   function addStations(list) {
@@ -106,7 +107,7 @@
       if (prev && prev.time === s.time) continue;
       if (prev && prev._m) stationLayer.removeLayer(prev._m);
       const m = L.marker([s.lat, s.lon], { icon: markerFor(s), zIndexOffset: s.temp != null ? 100 : 0, keyboard: true, title: s.name });
-      m.bindPopup(() => popupFor(s), { closeButton: false, offset: [0, -6] });
+      m.bindPopup(() => popupFor(s), { closeButton: false, offset: [0, -6], minWidth: s.hourly ? 240 : 50 });
       s._m = m;
       seen.set(s.id, s);
       stationLayer.addLayer(m);

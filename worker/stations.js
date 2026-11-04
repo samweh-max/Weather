@@ -128,13 +128,21 @@ async function rainGauges(lat, lon) {
     .slice(0, 6);
   const stations = await Promise.all(
     near.map(async ({ s, dist }) => {
-      const r = await getJson(`${base}/id/stations/${encodeURIComponent(s.notation)}/readings?_sorted&_limit=8&parameter=rainfall`).catch(() => ({ items: [] }));
+      const r = await getJson(`${base}/id/stations/${encodeURIComponent(s.notation)}/readings?_sorted&_limit=100&parameter=rainfall`).catch(() => ({ items: [] }));
       const items = (r.items || []).filter((x) => typeof x.value === "number").sort((a, b) => b.dateTime.localeCompare(a.dateTime));
       const latest = items[0];
-      let rain1h = null;
+      let rain1h = null, rain24h = null, hourly = null;
       if (latest) {
-        const cutoff = Date.parse(latest.dateTime) - 3600e3;
-        rain1h = round(items.filter((x) => Date.parse(x.dateTime) > cutoff).reduce((a, x) => a + x.value, 0), 1);
+        const end = Date.parse(latest.dateTime);
+        const sumSince = (ms) => round(items.filter((x) => Date.parse(x.dateTime) > end - ms).reduce((a, x) => a + x.value, 0), 1);
+        rain1h = sumSince(3600e3);
+        rain24h = sumSince(24 * 3600e3);
+        // Hour-by-hour totals for the last 24 hours, oldest first, for the timeline.
+        hourly = Array.from({ length: 24 }, (_, i) => {
+          const to = end - (23 - i) * 3600e3, from = to - 3600e3;
+          const inHour = items.filter((x) => { const t = Date.parse(x.dateTime); return t > from && t <= to; });
+          return { time: new Date(to).toISOString(), mm: inHour.length ? round(inHour.reduce((a, x) => a + x.value, 0), 1) : null };
+        });
       }
       return {
         id: `EA-${s.notation}`,
@@ -146,6 +154,8 @@ async function rainGauges(lat, lon) {
         time: latest ? latest.dateTime : null,
         temp: null, humidity: null, wind: null, gust: null, dir: null,
         rain1h,
+        rain24h,
+        hourly,
         raining: rain1h == null ? null : rain1h >= 0.2,
         pressure: null,
         wx: null,

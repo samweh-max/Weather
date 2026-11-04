@@ -456,3 +456,24 @@ input[type="search"] {
   :root:not([data-theme="light"]) .map.osm .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) saturate(.35) brightness(.85) contrast(.9); }
 }
 :root[data-theme="dark"] .map.osm .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) saturate(.35) brightness(.85) contrast(.9); }
+
+/* Tappable days on the Forecaster, and their details */
+button.drow { width: 100%; font: inherit; color: inherit; text-align: left; background: none; border: 0; border-top: 1px solid var(--line); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.lead + button.drow { border-top: 0; }
+button.drow.open .dl { color: var(--rain); }
+.dday { padding: 4px 0 14px; }
+.dgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-bottom: 8px; }
+.dgrid span { display: block; font-size: 12px; color: var(--faint); }
+.dgrid b { font-size: 14px; font-weight: 600; line-height: 1.35; }
+
+/* "How high will it get?" strip: name the two ends instead of a dash */
+.spread .ends { display: flex; justify-content: space-between; font-size: 12px; opacity: 0.88; margin-top: 2px; }
+
+/* Rain gauges: totals and a 24-hour timeline */
+button.srow { width: 100%; font: inherit; color: inherit; text-align: left; background: none; border: 0; border-top: 1px solid var(--line); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.lead + button.srow { border-top: 0; }
+.srow .r small { display: block; font-size: 10px; font-weight: 500; color: var(--faint); }
+.gdetail { padding: 2px 0 12px; }
+.rainline .gap { fill: var(--line); }
+.pop .chart { margin-top: 8px; }
+.pop .how { font-size: 11px; margin: 4px 0 0; }

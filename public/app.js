@@ -38,7 +38,7 @@ const store = {
 };
 
 const state = {
-  settings: Object.assign({ temp: "C", wind: "mph", rain: "mm", hidden: [] }, store.get("wc.settings", {})),
+  settings: Object.assign({ temp: "C", wind: "mph", rain: "mm", dist: "mi", hidden: [] }, store.get("wc.settings", {})),
   place: store.get("wc.place", null),
   saved: store.get("wc.saved", []),
   sources: null,          // [{id, enabled}]
@@ -144,6 +144,11 @@ const fmt = {
   },
   windUnit() {
     return { kmh: "km/h", ms: "m/s", kn: "kn", mph: "mph" }[state.settings.wind] || "mph";
+  },
+  dist(km) {
+    if (km == null) return "";
+    const v = state.settings.dist === "km" ? km : km / 1.609;
+    return `${v < 10 ? Math.round(v * 10) / 10 : Math.round(v)} ${state.settings.dist === "km" ? "km" : "mi"}`;
   },
   rain(mm) {
     if (mm == null) return null;
@@ -399,9 +404,10 @@ function renderHero(date, c) {
       <div class="stat"><div class="k">Wind</div><div class="v">${windVal}</div><div class="s">${windSub || "&nbsp;"}</div></div>
       <div class="stat"><div class="k">Agreement</div><div class="v">${agree[0]}</div><div class="s">${agree[1]}</div></div>
     </div>
-    <div class="spread" aria-label="Each source's high temperature, from ${fmt.temp(c.hiMin)} to ${fmt.temp(c.hiMax)}">
-      <div class="lbl"><span>Each source's high</span><span>${fmt.temp(c.hiMin)} – ${fmt.temp(c.hiMax)}</span></div>
+    <div class="spread" aria-label="Highs forecast by each source, from ${fmt.temp(c.hiMin)} to ${fmt.temp(c.hiMax)}">
+      <div class="lbl"><span>How high will it get? Each dot is one source</span></div>
       <div class="axis">${dots}<span class="med" style="left:${pos(c.hi)}%"></span></div>
+      <div class="ends"><span>Coolest ${fmt.temp(c.hiMin)}</span><span>Warmest ${fmt.temp(c.hiMax)}</span></div>
     </div>`;
 }
 
@@ -755,7 +761,7 @@ function prediction() {
     const hist = st.history.obs.map((o) => ({ key: Blend.toLocalKey(o.time, state.place.tz || "UTC"), temp: o.temp }));
     skill = Blend.scoreSkill(store.get(snapKey(), []), hist);
   }
-  return Blend.predict({ providers, stations: st.stations || [], nowKey: nowKey(), skill, placeElev: placeElev() });
+  return Blend.predict({ providers, stations: st.stations || [], nowKey: nowKey(), skill, placeElev: placeElev(), hours: 168 });
 }
 
 function forecastNotes(pred) {
@@ -826,7 +832,7 @@ function dayName(date) {
 function heroForecast(pred) {
   const d = pred.days[0];
   const h0 = pred.hours[0];
-  const conf = { high: ["High", "sources agree"], medium: ["Medium", "some disagreement"], low: ["Low", "sources disagree"] }[d.confidence];
+  const conf = { high: ["High", "sources agree"], medium: ["Medium", "partly agree"], low: ["Low", "sources differ"] }[d.confidence];
   const headline = (d.pop ?? 0) >= 50 && d.code !== "drizzle" ? `${WORDS[d.code]} likely` : WORDS[d.code];
   return {
     code: d.code, wind: d.wind, dir: d.dir,
@@ -870,26 +876,48 @@ function renderForecastPage() {
   const span = Math.max(scale.max - scale.min, 1);
   const drows = pred.days.map((d, i) => {
     const left = ((d.lo - scale.min) / span) * 100, width = Math.max(((d.hi - d.lo) / span) * 100, 4);
-    return `<div class="drow">
+    const open = state.fday === i;
+    return `<button class="drow${open ? " open" : ""}" data-day="${i}" aria-expanded="${open}">
       <div class="dl">${dayLabel(d.date, i)}<small>${new Date(d.date + "T12:00:00Z").getUTCDate()}<span class="conf ${d.confidence}" title="${d.confidence} confidence"></span></small></div>
       ${wxIcon(d.code, false, "ico")}
       <div class="viz"><div class="a">${fmt.temp(d.lo)}</div><div class="track"><i class="temp" style="left:${left.toFixed(1)}%;width:${width.toFixed(1)}%"></i></div><div class="b">${fmt.temp(d.hi)}</div></div>
       <div class="rp">${d.pop != null ? Math.round(d.pop) + "%" : ""}</div>
       <div class="wd">${windArrow(d.dir, "")}${fmt.windNum(d.wind)}</div>
-    </div>`;
+    </button>${open ? dayDetail(pred, d, i) : ""}`;
   }).join("");
 
   box.innerHTML = `
-    <section class="panel notes"><h2>Forecaster's notes</h2>${notes}
-      <div class="byline">Worked out on this phone from ${pred.weights.length} forecasts and ${(state.stations?.stations || []).length} live stations.</div></section>
     <section class="panel"><h2>Next 24 hours</h2><p class="lead">Line: our temperature. Shading: range across all sources.</p>${hourChart(pred.hours.slice(0, 24))}
       <div class="legend"><span><i style="background:var(--warm);opacity:.5"></i>Temperature</span><span><i style="background:var(--rain)"></i>Chance of rain</span><span><i style="background:var(--wind)"></i>Wind, ${fmt.windUnit()}</span></div></section>
-    <section class="panel"><h2>Next 7 days</h2><p class="lead">Dots show confidence: <span class="conf high"></span> high <span class="conf medium"></span> medium <span class="conf low"></span> low</p>${drows}</section>
-    <section class="panel"><h2>How this forecast is made</h2><p class="how">Tailored to <b>${esc(state.place.gps ? "where you are" : state.place.name)}</b>${placeElev() != null ? ` (${Math.round(placeElev())} m above sea level)` : ""}, using stations within 40 km. Closer stations count more, and readings from higher or lower stations are corrected for height.</p><p class="how">${basisText}</p>${nowText}${wrows}</section>`;
+    <section class="panel"><h2>Next 7 days</h2><p class="lead">Tap a day for details. Dots show confidence: <span class="conf high"></span> high <span class="conf medium"></span> medium <span class="conf low"></span> low</p>${drows}</section>
+    <section class="panel notes"><h2>Forecaster's notes</h2>${notes}
+      <div class="byline">Worked out on this phone from ${pred.weights.length} forecasts and ${(state.stations?.stations || []).length} live stations.</div></section>
+    <section class="panel"><h2>How this forecast is made</h2><p class="how">Tailored to <b>${esc(state.place.gps ? "where you are" : state.place.name)}</b>${placeElev() != null ? ` (${Math.round(placeElev())} m above sea level)` : ""}, using stations within ${fmt.dist(40)}. Closer stations count more, and readings from higher or lower stations are corrected for height.</p><p class="how">${basisText}</p>${nowText}${wrows}</section>`;
+  box.querySelectorAll(".drow").forEach((b) => {
+    b.onclick = () => { const i = Number(b.dataset.day); state.fday = state.fday === i ? null : i; render(); };
+  });
   return pred;
 }
 
-function hourChart(hours) {
+// The details that open under a day in "Next 7 days".
+function dayDetail(pred, d, i) {
+  const hrs = pred.hours.filter((h) => h.time.slice(0, 10) === d.date);
+  const conf = { high: "Sources agree", medium: "Sources partly agree", low: "Sources differ" }[d.confidence];
+  const rain = d.pop != null ? `${Math.round(d.pop)}%${d.mm ? `, about ${fmt.rain(d.mm)}` : ""}` : d.mm ? `about ${fmt.rain(d.mm)}` : "–";
+  const wind = d.wind != null ? `${fmt.windNum(d.wind)} ${fmt.windUnit()}${d.dir != null ? ` from the ${COMPASS_WORDS[compass(d.dir)] || compass(d.dir)}` : ""}${d.gust != null ? `, gusts ${fmt.windNum(d.gust)}` : ""}` : "–";
+  const highs = d.n > 1 ? `${fmt.temp(d.hiMin)} to ${fmt.temp(d.hiMax)} across ${d.n} sources` : "one source";
+  return `<div class="dday">
+    <div class="dgrid">
+      <div><span>High and low</span><b>${fmt.temp(d.hi)} and ${fmt.temp(d.lo)}</b></div>
+      <div><span>Rain</span><b>${rain}</b></div>
+      <div><span>Wind</span><b>${wind}</b></div>
+      <div><span>${conf}</span><b>Highs ${highs}</b></div>
+    </div>
+    ${hrs.length >= 4 ? hourChart(hrs, i === 0) : `<p class="how">Hour-by-hour detail isn't available this far ahead.</p>`}
+  </div>`;
+}
+
+function hourChart(hours, fromNow = true) {
   if (hours.length < 2) return "";
   const W = 340, top = 22, th = 72, rTop = 112, rh = 30, labY = 160, windY = 178;
   const step = (W - 16) / (hours.length - 1);
@@ -910,7 +938,7 @@ function hourChart(hours) {
     if (i % 3 === 0) {
       g += `<circle class="pt" cx="${x(i).toFixed(1)}" cy="${y(h.temp).toFixed(1)}" r="3"/>`;
       g += `<text class="tl" x="${x(i).toFixed(1)}" y="${(y(h.temp) - 8).toFixed(1)}">${fmt.temp(h.temp)}</text>`;
-      g += `<text class="hl" x="${x(i).toFixed(1)}" y="${labY}">${i === 0 ? "Now" : h.time.slice(11, 13)}</text>`;
+      g += `<text class="hl" x="${x(i).toFixed(1)}" y="${labY}">${i === 0 && fromNow ? "Now" : h.time.slice(11, 13)}</text>`;
       if (h.wind != null) {
         const rot = h.dir == null ? 0 : (h.dir + 180) % 360;
         g += `<g transform="translate(${x(i).toFixed(1)} ${windY}) rotate(${rot})"><path class="wa" d="M0 -6 4.5 5.5 0 3 -4.5 5.5z"/></g>`;
@@ -919,7 +947,7 @@ function hourChart(hours) {
     }
   });
   g += `<text class="ax" x="0" y="${rTop - 4}">Rain %</text>`;
-  return `<svg class="chart" viewBox="0 0 ${W} ${windY + 22}" role="img" aria-label="Temperature, rain chance and wind for the next 24 hours">${g}</svg>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${windY + 22}" role="img" aria-label="Temperature, rain chance and wind by hour">${g}</svg>`;
 }
 
 // ---------- Stations page ----------
@@ -958,7 +986,7 @@ function ago(iso) {
 function renderStationsPage() {
   const box = $("#stationsList");
   if (state.place && window.StationMap) {
-    StationMap.show($("#map"), state.place, (state.stations && state.stations.stations) || [], { fmt, api, esc, ago, compass });
+    StationMap.show($("#map"), state.place, (state.stations && state.stations.stations) || [], { fmt, api, esc, ago, compass, timeline: rainTimeline });
   }
   const st = state.stations;
   if (!st) {
@@ -976,15 +1004,51 @@ function renderStationsPage() {
     const list = (st.stations || []).filter((s) => s.network === id);
     if (!list.length) continue;
     const rows = list.map((s) => {
+      if (s.network === "raingauge") return gaugeRow(s);
       const rain = s.rain1h != null ? (s.rain1h > 0 ? `<span class="r">${fmt.rain(s.rain1h)}/h</span>` : `<span class="r dry">dry</span>`)
         : s.wx ? `<span class="r">${esc(s.wx)}</span>` : s.raining === false ? `<span class="r dry">dry</span>` : `<span class="r"></span>`;
-      return `<div class="srow"><div class="nm"><b>${esc(s.name)}</b><small>${s.dist} km · ${ago(s.time)}</small></div>
+      return `<div class="srow"><div class="nm"><b>${esc(s.name)}</b><small>${fmt.dist(s.dist)} · ${ago(s.time)}</small></div>
         <div class="rd">${rain}${s.wind != null ? `<span class="w">${windArrow(s.dir, "")}${fmt.windNum(s.wind)}</span>` : ""}${s.temp != null ? `<span class="t">${fmt.temp(s.temp)}</span>` : ""}</div></div>`;
     }).join("");
     groups += `<section class="panel"><h2>${name}</h2><p class="lead">${lead}</p>${rows}</section>`;
   }
   box.innerHTML = `<section class="panel"><h2>Station networks</h2><p class="lead">Live readings feed into the Forecaster.</p><div class="nets">${nets}</div></section>${groups ||
     `<section class="panel"><p class="lead">No stations reported near here in the last few hours.</p></section>`}`;
+  box.querySelectorAll(".srow.gauge").forEach((b) => {
+    b.onclick = () => { state.openGauge = state.openGauge === b.dataset.id ? null : b.dataset.id; renderStationsPage(); };
+  });
+}
+
+// A rain gauge: how much has fallen, and a 24-hour timeline when tapped.
+function gaugeRow(s) {
+  const open = state.openGauge === s.id;
+  const total = s.rain24h != null ? `<span class="r${s.rain24h > 0 ? "" : " dry"}">${s.rain24h > 0 ? fmt.rain(s.rain24h) : "dry"}<small>24 h</small></span>` : "";
+  const hour = s.rain1h != null ? `<span class="r${s.rain1h > 0 ? "" : " dry"}">${s.rain1h > 0 ? fmt.rain(s.rain1h) : "dry"}<small>last hour</small></span>` : "";
+  return `<button class="srow gauge${open ? " open" : ""}" data-id="${esc(s.id)}" aria-expanded="${open}">
+      <div class="nm"><b>${esc(s.name)}</b><small>${fmt.dist(s.dist)} · ${ago(s.time)}</small></div>
+      <div class="rd">${hour}${total}</div></button>${open ? `<div class="gdetail">${rainTimeline(s.hourly)}</div>` : ""}`;
+}
+
+function rainTimeline(hourly) {
+  if (!hourly || !hourly.length) return `<p class="how">No timeline from this gauge.</p>`;
+  const W = 340, H = 64, top = 14, n = hourly.length, step = W / n;
+  const max = Math.max(1, ...hourly.map((h) => h.mm || 0));
+  let g = `<line class="grid" x1="0" x2="${W}" y1="${top + H}" y2="${top + H}"/>`;
+  hourly.forEach((h, i) => {
+    const x = i * step + 1.5, bw = step - 3;
+    if (h.mm == null) g += `<rect class="gap" x="${x.toFixed(1)}" y="${top + H - 2}" width="${bw.toFixed(1)}" height="2"/>`;
+    else if (h.mm > 0) {
+      const bh = Math.max((h.mm / max) * H, 2);
+      g += `<rect class="rb" x="${x.toFixed(1)}" y="${(top + H - bh).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="1.5"><title>${fmt.rain(h.mm)}</title></rect>`;
+      if (h.mm === max && max > 0) g += `<text class="tl" x="${(x + bw / 2).toFixed(1)}" y="${(top + H - bh - 4).toFixed(1)}">${fmt.rain(h.mm)}</text>`;
+    }
+    if (i % 6 === 5 || i === n - 1) {
+      const hh = new Date(h.time).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: (state.place && state.place.tz) || undefined });
+      g += `<text class="hl" x="${(x + bw / 2).toFixed(1)}" y="${top + H + 14}">${i === n - 1 ? "Now" : hh}</text>`;
+    }
+  });
+  return `<svg class="chart rainline" viewBox="0 0 ${W} ${top + H + 20}" role="img" aria-label="Rain each hour over the last 24 hours">${g}</svg>
+    <p class="how">Rain each hour over the last 24 hours. Hours with no reading show as a thin grey line.</p>`;
 }
 
 // ---------- Place sheet ----------
@@ -1182,6 +1246,14 @@ function demoBody(url) {
   return { providers, fetchedAt: new Date().toISOString() };
 }
 
+function demoGauge(i, wet) {
+  const hourly = Array.from({ length: 24 }, (_, k) => {
+    const shower = wet && k > 15 ? Math.max(0, Math.sin((k - 15 + i) / 2) * 1.6) : k > 3 && k < 8 && i % 2 ? 0.4 * ((k + i) % 3) : 0;
+    return { time: new Date(Date.now() - (23 - k) * 3600e3).toISOString(), mm: k === 10 && i === 1 ? null : Math.round(shower * 10) / 10 };
+  });
+  return { hourly, rain24h: Math.round(hourly.reduce((a, h) => a + (h.mm || 0), 0) * 10) / 10 };
+}
+
 function demoStations(lat, lon) {
   const now = Date.now();
   const t = (min) => new Date(now - min * 60000).toISOString();
@@ -1202,7 +1274,7 @@ function demoStations(lat, lon) {
   for (let i = 0; i < 7; i++) {
     const dx = (rnd(i + 200) - 0.5) * 40, dy = (rnd(i + 300) - 0.5) * 34;
     const wet = dx < 6;
-    list.push(s({ id: `EA-${i}`, network: "raingauge", name: `Rain gauge, ${["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360 / 45) % 8]} of you`, ...at(dx, dy), time: t(19), rain1h: wet ? Math.round(rnd(i) * 15) / 10 + 0.2 : 0, raining: wet }));
+    list.push(s({ id: `EA-${i}`, network: "raingauge", name: `Rain gauge, ${["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360 / 45) % 8]} of you`, ...at(dx, dy), time: t(19), rain1h: wet ? Math.round(rnd(i) * 15) / 10 + 0.2 : 0, raining: wet, ...demoGauge(i, wet) }));
   }
   list.sort((a, b) => a.dist - b.dist);
   const history = {
