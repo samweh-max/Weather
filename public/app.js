@@ -465,7 +465,7 @@ function renderRow(p, date, scale) {
     const loading = state.loading.has(p.source) && !r;
     const err = state.sourceErrors[p.source] || (r && !r.ok && r.error);
     btn.innerHTML = `<div class="who"><div class="n">${esc(p.name)}</div><div class="s">${esc(p.note)}</div></div>
-      <div class="msg">${loading ? '<span class="skeleton"></span>' : err ? `${esc(err)}` : r ? "No forecast this far ahead" : ""}</div>`;
+      <div class="msg">${loading ? '<span class="skeleton"></span>' : err ? `${esc(err)}` : r ? (date === placeToday() ? "Nothing left for today" : "No forecast this far ahead") : ""}</div>`;
     btn.disabled = true;
   }
   row.append(btn);
