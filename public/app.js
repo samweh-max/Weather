@@ -891,6 +891,7 @@ function heroForecast(pred) {
 
 function renderForecastPage() {
   const box = $("#pageForecast");
+  CHARTS.clear();
   const pred = prediction();
   if (!pred || !pred.days.length) {
     box.innerHTML = `<div class="panel"><h2>Forecaster</h2><p class="lead">${state.loading.size || state.stationsLoading ? "Gathering forecasts and station readings…" : "No forecasts to work from yet."}</p></div>`;
@@ -927,9 +928,9 @@ function renderForecastPage() {
   }).join("");
 
   box.innerHTML = `
-    <section class="panel"><h2>Next 24 hours</h2><p class="lead">Line: our temperature. Shading: range across all sources.</p>${hourChart(pred.hours.slice(0, 24))}
+    <section class="panel"><h2>Next 24 hours</h2>${hourChart(pred.hours.slice(0, 24))}
       <div class="legend"><span><i style="background:var(--warm);opacity:.5"></i>Temperature</span><span><i style="background:var(--rain)"></i>Chance of rain</span><span><i style="background:var(--wind)"></i>Wind, ${fmt.windUnit()}</span></div></section>
-    <section class="panel"><h2>Next 7 days</h2><p class="lead">Tap a day for details. Dots show confidence: <span class="conf high"></span> high <span class="conf medium"></span> medium <span class="conf low"></span> low</p>${drows}</section>
+    <section class="panel"><h2>Next 7 days</h2>${drows}</section>
     <section class="panel notes"><h2>Forecaster's notes</h2>${notes}
       <div class="byline">Worked out on this phone from ${pred.weights.length} forecasts and ${(state.stations?.stations || []).length} live stations.</div></section>
     <section class="panel"><h2>How this forecast is made</h2><p class="how">Tailored to <b>${esc(state.place.gps ? "where you are" : state.place.name)}</b>${placeElev() != null ? ` (${Math.round(placeElev())} m above sea level)` : ""}, using stations within ${fmt.dist(40)}. Closer stations count more, and readings from higher or lower stations are corrected for height.</p><p class="how">${basisText}</p>${nowText}${wrows}</section>`;
@@ -941,7 +942,8 @@ function renderForecastPage() {
 
 // The details that open under a day in "Next 7 days".
 function dayDetail(pred, d, i) {
-  const hrs = pred.hours.filter((h) => h.time.slice(0, 10) === d.date);
+  // Today shows the next 24 hours from now, so there is always something to see late in the evening.
+  const hrs = i === 0 ? pred.hours.slice(0, 24) : pred.hours.filter((h) => h.time.slice(0, 10) === d.date);
   const conf = { high: "Sources agree", medium: "Sources partly agree", low: "Sources differ" }[d.confidence];
   const rain = d.pop != null ? `${Math.round(d.pop)}%${d.mm ? `, about ${fmt.rain(d.mm)}` : ""}` : d.mm ? `about ${fmt.rain(d.mm)}` : "–";
   const wind = d.wind != null ? `${fmt.windNum(d.wind)} ${fmt.windUnit()}${d.dir != null ? ` from the ${COMPASS_WORDS[compass(d.dir)] || compass(d.dir)}` : ""}${d.gust != null ? `, gusts ${fmt.windNum(d.gust)}` : ""}` : "–";
@@ -953,7 +955,7 @@ function dayDetail(pred, d, i) {
       <div><span>Wind</span><b>${wind}</b></div>
       <div><span>${conf}</span><b>Highs ${highs}</b></div>
     </div>
-    ${hrs.length >= 4 ? hourChart(hrs, i === 0) : `<p class="how">Hour-by-hour detail isn't available this far ahead.</p>`}
+    ${hrs.length >= 2 ? hourChart(hrs, i === 0) : ""}
   </div>`;
 }
 
@@ -987,7 +989,67 @@ function hourChart(hours, fromNow = true) {
     }
   });
   g += `<text class="ax" x="0" y="${rTop - 4}">Rain %</text>`;
-  return `<svg class="chart" viewBox="0 0 ${W} ${windY + 22}" role="img" aria-label="Temperature, rain chance and wind by hour">${g}</svg>`;
+  g += `<g class="scrub" visibility="hidden"><line class="scrub-line" x1="0" x2="0" y1="${top - 14}" y2="${windY + 20}"/><circle class="scrub-dot" r="4.5"/></g>`;
+  const id = String(++chartSeq);
+  CHARTS.set(id, { hours, x, y, W, step, fromNow });
+  return `<div class="chartwrap" data-chart="${id}"><div class="scrub-tip" hidden></div>
+    <svg class="chart" viewBox="0 0 ${W} ${windY + 22}" role="img" aria-label="Temperature, rain chance and wind by hour. Slide a finger along it to read each hour.">${g}</svg></div>`;
+}
+
+// Slide a finger (or the mouse) along an hourly chart: a line follows it and the hour's numbers show above.
+const CHARTS = new Map();
+let chartSeq = 0;
+function initChartScrub() {
+  let hideT = 0;
+  const show = (wrap, clientX) => {
+    const c = CHARTS.get(wrap.dataset.chart);
+    if (!c) return;
+    const svg = wrap.querySelector("svg.chart"), box = svg.getBoundingClientRect();
+    const vx = ((clientX - box.left) / box.width) * c.W;
+    const i = Math.max(0, Math.min(c.hours.length - 1, Math.round((vx - 8) / c.step)));
+    const h = c.hours[i], px = c.x(i);
+    const g = svg.querySelector(".scrub");
+    g.setAttribute("visibility", "visible");
+    g.querySelector(".scrub-line").setAttribute("x1", px);
+    g.querySelector(".scrub-line").setAttribute("x2", px);
+    const dot = g.querySelector(".scrub-dot");
+    dot.setAttribute("cx", px);
+    dot.setAttribute("cy", c.y(h.temp));
+    const tip = wrap.querySelector(".scrub-tip");
+    const when = i === 0 && c.fromNow ? "Now" : h.time.slice(11, 16);
+    tip.innerHTML = `<b>${when}</b><span>${fmt.temp(h.temp)}</span><span class="r">${h.pop != null ? Math.round(h.pop) + "% rain" : fmt.rain(h.mm) || ""}</span><span class="w">${windArrow(h.dir, "")}${fmt.windNum(h.wind)} ${fmt.windUnit()}</span>`;
+    tip.hidden = false;
+    const left = (px / c.W) * box.width;
+    tip.style.left = Math.max(0, Math.min(box.width - tip.offsetWidth, left - tip.offsetWidth / 2)) + "px";
+    clearTimeout(hideT);
+  };
+  const hide = (wrap, delay) => {
+    clearTimeout(hideT);
+    hideT = setTimeout(() => {
+      wrap.querySelector("svg.chart .scrub")?.setAttribute("visibility", "hidden");
+      const tip = wrap.querySelector(".scrub-tip");
+      if (tip) tip.hidden = true;
+    }, delay);
+  };
+  document.addEventListener("pointerdown", (e) => {
+    const wrap = e.target.closest(".chartwrap");
+    if (!wrap) return;
+    show(wrap, e.clientX);
+    const move = (ev) => show(wrap, ev.clientX);
+    const end = () => { hide(wrap, 1600); wrap.removeEventListener("pointermove", move); };
+    wrap.addEventListener("pointermove", move);
+    wrap.addEventListener("pointerup", end, { once: true });
+    wrap.addEventListener("pointercancel", end, { once: true });
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (e.pointerType !== "mouse" || e.buttons) return;
+    const wrap = e.target.closest(".chartwrap");
+    if (wrap) show(wrap, e.clientX);
+  });
+  document.addEventListener("pointerout", (e) => {
+    const wrap = e.target.closest && e.target.closest(".chartwrap");
+    if (wrap && e.pointerType === "mouse" && !wrap.contains(e.relatedTarget)) hide(wrap, 300);
+  });
 }
 
 // ---------- Stations page ----------
@@ -1050,9 +1112,9 @@ function renderStationsPage() {
       return `<div class="srow"><div class="nm"><b>${esc(s.name)}</b><small>${fmt.dist(s.dist)} · ${ago(s.time)}</small></div>
         <div class="rd">${rain}${s.wind != null ? `<span class="w">${windArrow(s.dir, "")}${fmt.windNum(s.wind)}</span>` : ""}${s.temp != null ? `<span class="t">${fmt.temp(s.temp)}</span>` : ""}</div></div>`;
     }).join("");
-    groups += `<section class="panel"><h2>${name}</h2><p class="lead">${lead}</p>${rows}</section>`;
+    groups += `<section class="panel"><h2>${name}</h2>${rows}</section>`;
   }
-  box.innerHTML = `<section class="panel"><h2>Station networks</h2><p class="lead">Live readings feed into the Forecaster.</p><div class="nets">${nets}</div></section>${groups ||
+  box.innerHTML = `<section class="panel"><h2>Station networks</h2><div class="nets">${nets}</div></section>${groups ||
     `<section class="panel"><p class="lead">No stations reported near here in the last few hours.</p></section>`}`;
   box.querySelectorAll(".srow.gauge").forEach((b) => {
     b.onclick = () => { state.openGauge = state.openGauge === b.dataset.id ? null : b.dataset.id; renderStationsPage(); };
@@ -1087,8 +1149,7 @@ function rainTimeline(hourly) {
       g += `<text class="hl" x="${(x + bw / 2).toFixed(1)}" y="${top + H + 14}">${i === n - 1 ? "Now" : hh}</text>`;
     }
   });
-  return `<svg class="chart rainline" viewBox="0 0 ${W} ${top + H + 20}" role="img" aria-label="Rain each hour over the last 24 hours">${g}</svg>
-    <p class="how">Rain each hour over the last 24 hours. Hours with no reading show as a thin grey line.</p>`;
+  return `<svg class="chart rainline" viewBox="0 0 ${W} ${top + H + 20}" role="img" aria-label="Rain each hour over the last 24 hours">${g}</svg>`;
 }
 
 // ---------- Place sheet ----------
@@ -1393,6 +1454,7 @@ function init() {
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => goPage(b.dataset.page)));
   window.addEventListener("hashchange", () => switchPage(pageFromHash()));
   window.addEventListener("resize", placeTabBlob);
+  initChartScrub();
   if (document.fonts) document.fonts.ready.then(placeTabBlob);
   state.page = pageFromHash();
   document.querySelectorAll("#modes button").forEach((b) => (b.onclick = () => {
