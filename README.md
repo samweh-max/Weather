@@ -36,11 +36,8 @@ The blending code is in `public/blend.js` and runs on the phone. Past forecasts 
 | Airport reports (METAR, aviationweather.gov) | About 60 UK airports, every 30 minutes | None |
 | Environment Agency rain gauges | About 1,000 gauges in England, every 15 minutes | None |
 | Met Office land observations | About 150 official stations, hourly | Free DataHub "Land Observations" subscription (`METOFFICE_OBS_KEY`; falls back to `METOFFICE_KEY`) |
-| Netatmo home stations | Thousands of shared home stations | Free Netatmo developer app (see below) |
 
 Not included: Met Office WOW and Weather Underground have no public read API, and Scotland's (SEPA) and Wales's (NRW) rain gauges need their own registrations. These could be added later.
-
-**Netatmo setup:** create an app at [dev.netatmo.com](https://dev.netatmo.com/), generate a token with the `read_station` scope, then set `NETATMO_CLIENT_ID`, `NETATMO_CLIENT_SECRET` and `NETATMO_REFRESH_TOKEN` as secrets. Netatmo sometimes issues a new refresh token. To keep it automatically, create a KV namespace (`npx wrangler kv namespace create TOKENS`) and add it to `wrangler.toml` as the `TOKENS` binding.
 
 ## How it's built
 
@@ -72,9 +69,6 @@ npx wrangler secret put ACCUWEATHER_KEY
 npx wrangler secret put OPENWEATHER_KEY
 # optional, for more stations:
 npx wrangler secret put METOFFICE_OBS_KEY
-npx wrangler secret put NETATMO_CLIENT_ID
-npx wrangler secret put NETATMO_CLIENT_SECRET
-npx wrangler secret put NETATMO_REFRESH_TOKEN
 npm run deploy
 ```
 

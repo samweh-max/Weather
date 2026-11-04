@@ -37,18 +37,6 @@ function fixture(url, opts) {
       { datetime: iso(3600), temperature: 8.4, humidity: 93, mslp: 1028, wind_speed: 5, wind_gust: 10, wind_direction: "ENE", weather_code: 12 },
     ];
   }
-  if (u.hostname === "api.netatmo.com") {
-    if (u.pathname === "/oauth2/token") return { access_token: "tok", refresh_token: "r2", expires_in: 10800 };
-    return { body: [
-      { _id: "a", place: { location: [-0.12, 51.51], city: "London" }, measures: {
-        m1: { res: { [now - 300]: [8.6, 90] }, type: ["temperature", "humidity"] },
-        m2: { rain_60min: 0.6, rain_24h: 3 },
-        m3: { wind_strength: 12, wind_angle: 70, gust_strength: 20 },
-      } },
-      { _id: "b", place: { location: [-0.13, 51.52] }, measures: { m1: { res: { [now - 300]: [19, 40] }, type: ["temperature", "humidity"] } } },
-      { _id: "c", place: { location: [-0.11, 51.5] }, measures: { m1: { res: { [now - 300]: [8.2, 88] }, type: ["temperature", "humidity"] } } },
-    ] };
-  }
   throw new Error("Unexpected " + url);
 }
 
@@ -61,7 +49,7 @@ test("free networks work without any keys", async () => {
   assert.equal(r.networks.airport.ok, true);
   assert.equal(r.networks.raingauge.ok, true);
   assert.equal(r.networks.metoffice.enabled, false);
-  assert.equal(r.networks.netatmo.enabled, false);
+  assert.equal(r.networks.netatmo, undefined);
 });
 
 test("airports: latest report per airport, nearby only, in km/h", async () => {
@@ -100,16 +88,6 @@ test("Met Office observations use their own key and convert knots", async () => 
 test("geohash centre", () => {
   const c = geohashCentre("gcpvj0");
   assert.ok(Math.abs(c.lat - 51.50) < 0.01 && Math.abs(c.lon + 0.13) < 0.01);
-});
-
-test("Netatmo home stations, with outliers removed", async () => {
-  const r = await stationsNear(place, { NETATMO_CLIENT_ID: "x", NETATMO_CLIENT_SECRET: "y", NETATMO_REFRESH_TOKEN: "z" });
-  const na = r.stations.filter((s) => s.network === "netatmo");
-  assert.equal(na.length, 2, "the 19° reading is dropped");
-  const a = na.find((s) => s.id === "NA-a");
-  assert.equal(a.rain1h, 0.6);
-  assert.equal(a.wind, 12);
-  assert.equal(a.dir, 70);
 });
 
 test("a failing network is reported, not fatal", async () => {

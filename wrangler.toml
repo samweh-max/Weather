@@ -17,7 +17,3 @@ CONTACT = "https://github.com/samweh-max"
 #   npx wrangler secret put ACCUWEATHER_KEY
 #   npx wrangler secret put OPENWEATHER_KEY
 
-# Optional: lets the worker keep Netatmo's refreshed sign-in token.
-# [[kv_namespaces]]
-# binding = "TOKENS"
-# id = "<from: npx wrangler kv namespace create TOKENS>"

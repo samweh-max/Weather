@@ -74,10 +74,6 @@
         iconSize: [18, 18], iconAnchor: [9, 9],
       });
     }
-    // Home stations are many and close together: show them as small dots until zoomed in.
-    if (s.network === "netatmo" && map.getZoom() < 12) {
-      return L.divIcon({ className: "", html: `<div class="mk-dot" style="--c:${tempColor(s.temp)}"></div>`, iconSize: [12, 12], iconAnchor: [6, 6] });
-    }
     const arrow = s.wind != null && s.dir != null
       ? `<svg class="mk-arrow" viewBox="0 0 24 24" style="transform:rotate(${(s.dir + 180) % 360}deg)"><path d="M12 2.5 18.5 20 12 16.2 5.5 20z"/></svg>` : "";
     const official = s.network === "airport" || s.network === "metoffice";
@@ -90,7 +86,7 @@
 
   function popupFor(s) {
     const f = opts.fmt;
-    const net = { airport: "Airport", metoffice: "Met Office station", netatmo: "Home weather station", raingauge: "Rain gauge" }[s.network];
+    const net = { airport: "Airport", metoffice: "Met Office station", raingauge: "Rain gauge" }[s.network];
     const rows = [];
     if (s.temp != null) rows.push(["Temperature", f.temp(s.temp)]);
     if (s.humidity != null) rows.push(["Humidity", Math.round(s.humidity) + "%"]);
@@ -223,13 +219,6 @@
         matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => base.setUrl(baseUrl()));
       }
       stationLayer = L.layerGroup().addTo(map);
-      let small = null;
-      map.on("zoomend", () => {
-        const now = map.getZoom() < 12;
-        if (now === small) return;
-        small = now;
-        for (const s of seen.values()) if (s._m && s.network === "netatmo") s._m.setIcon(markerFor(s));
-      });
       map.on("moveend", () => { clearTimeout(map._t); map._t = setTimeout(fetchAround, 500); });
       lastFetch = L.latLng(place.lat, place.lon);
       document.getElementById("radarBtn").onclick = (e) => setRadar(e.currentTarget.getAttribute("aria-pressed") !== "true");
