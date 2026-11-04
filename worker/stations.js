@@ -9,7 +9,6 @@
 //   airport    – airport METAR reports via aviationweather.gov (free, no key)
 //   raingauge  – Environment Agency rain gauges, England (free, no key)
 //   metoffice  – Met Office land observations (free DataHub key, separate subscription)
-//   netatmo    – Netatmo home weather stations shared publicly (free developer app)
 
 const KT = 1.852;
 
@@ -18,7 +17,6 @@ export async function stationsNear({ lat, lon }, env) {
     airport: () => airports(lat, lon),
     raingauge: () => rainGauges(lat, lon),
     metoffice: env.METOFFICE_OBS_KEY || env.METOFFICE_KEY ? () => metOfficeObs(lat, lon, env) : null,
-    netatmo: env.NETATMO_CLIENT_ID && env.NETATMO_CLIENT_SECRET && env.NETATMO_REFRESH_TOKEN ? () => netatmo(lat, lon, env) : null,
   };
   const networks = {};
   const stations = [];
@@ -218,73 +216,6 @@ async function metOfficeObs(lat, lon, env) {
       wx: null,
     }],
   };
-}
-
-// ---------- Netatmo public home stations ----------
-
-async function netatmoToken(env) {
-  const cache = typeof caches !== "undefined" ? caches.default : null;
-  const key = new Request("https://cache.weather/netatmo-token");
-  const hit = cache && (await cache.match(key));
-  if (hit) return (await hit.json()).access_token;
-  const refresh = (env.TOKENS && (await env.TOKENS.get("netatmo_refresh"))) || env.NETATMO_REFRESH_TOKEN;
-  const res = await fetch("https://api.netatmo.com/oauth2/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refresh,
-      client_id: env.NETATMO_CLIENT_ID,
-      client_secret: env.NETATMO_CLIENT_SECRET,
-    }),
-  });
-  if (!res.ok) throw new Error(`Netatmo sign-in failed (${res.status})`);
-  const tok = await res.json();
-  // Netatmo can hand back a new refresh token; keep it if we have somewhere to put it.
-  if (tok.refresh_token && tok.refresh_token !== refresh && env.TOKENS) await env.TOKENS.put("netatmo_refresh", tok.refresh_token);
-  if (cache) {
-    await cache.put(key, new Response(JSON.stringify({ access_token: tok.access_token }), {
-      headers: { "Cache-Control": `public, max-age=${Math.max(60, (tok.expires_in || 10800) - 300)}` },
-    }));
-  }
-  return tok.access_token;
-}
-
-async function netatmo(lat, lon, env) {
-  const token = await netatmoToken(env);
-  const d = 0.12;
-  const q = new URLSearchParams({ lat_ne: lat + d, lon_ne: lon + d * 1.6, lat_sw: lat - d, lon_sw: lon - d * 1.6, filter: "true" });
-  const data = await getJson(`https://api.netatmo.com/api/getpublicdata?${q}`, { headers: { Authorization: `Bearer ${token}` } });
-  const out = [];
-  for (const st of data.body || []) {
-    const [sLon, sLat] = st.place?.location || [];
-    if (typeof sLat !== "number") continue;
-    const s = {
-      id: `NA-${st._id}`, network: "netatmo", name: st.place?.street || st.place?.city || "Home station",
-      lat: sLat, lon: sLon, dist: round(distKm(lat, lon, sLat, sLon), 1), time: null, elev: num(st.place?.altitude),
-      temp: null, humidity: null, wind: null, gust: null, dir: null, rain1h: null, raining: null, pressure: null, wx: null,
-    };
-    for (const m of Object.values(st.measures || {})) {
-      if (m.res && m.type) {
-        const [ts, vals] = Object.entries(m.res)[0] || [];
-        if (!vals) continue;
-        m.type.forEach((t, i) => {
-          if (t === "temperature") s.temp = num(vals[i]);
-          if (t === "humidity") s.humidity = num(vals[i]);
-          if (t === "pressure") s.pressure = num(vals[i]);
-        });
-        if (ts) s.time = new Date(Number(ts) * 1000).toISOString();
-      }
-      if (m.rain_60min != null) { s.rain1h = num(m.rain_60min); s.raining = s.rain1h >= 0.2; }
-      if (m.wind_strength != null) { s.wind = num(m.wind_strength); s.gust = num(m.gust_strength); s.dir = num(m.wind_angle); }
-    }
-    if (s.temp != null || s.rain1h != null || s.wind != null) out.push(s);
-  }
-  // Home stations can sit in the sun or by a wall. Drop readings far from the local median.
-  const temps = out.map((s) => s.temp).filter((t) => t != null).sort((a, b) => a - b);
-  const med = temps.length ? temps[temps.length >> 1] : null;
-  const kept = out.filter((s) => s.temp == null || med == null || Math.abs(s.temp - med) <= 3);
-  return { stations: kept.sort((a, b) => a.dist - b.dist).slice(0, 15) };
 }
 
 // ---------- Helpers ----------

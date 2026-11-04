@@ -927,7 +927,6 @@ function hourChart(hours) {
 const NETWORKS = {
   airport: ["Airports", "Official reports from UK airports, every 30 minutes"],
   metoffice: ["Met Office stations", "Hourly readings from about 150 official sites"],
-  netatmo: ["Home weather stations", "Netatmo stations shared by their owners"],
   raingauge: ["Rain gauges", "Environment Agency gauges, every 15 minutes (England)"],
 };
 
@@ -968,7 +967,7 @@ function renderStationsPage() {
   }
   const nets = Object.entries(NETWORKS).map(([id, [name]]) => {
     const n = (st.networks || {})[id] || {};
-    const status = !n.enabled ? ["", id === "netatmo" ? "needs a free Netatmo app" : "needs a free key"]
+    const status = !n.enabled ? ["", "needs a free key"]
       : n.ok ? ["ok", `${n.count} nearby`] : ["bad", n.error || "not responding"];
     return `<div class="net"><span>${name}</span><span class="st ${status[0]}">${esc(status[1])}</span></div>`;
   }).join("");
@@ -1200,13 +1199,6 @@ function demoStations(lat, lon) {
     s({ id: "EGGW", network: "airport", name: london ? "Luton" : "Airport north", ...at(-15, 42), time: t(14), temp: 10.1, wind: 30, gust: 44, dir: 240, raining: true, wx: "light rain", pressure: 1005, cover: "OVC", elev: 160 }),
     s({ id: "MO-1", network: "metoffice", name: london ? "London St James's Park" : "Met Office station", ...at(-0.8, -0.9), time: t(31), temp: 11.9, humidity: 91, wind: 17, gust: 33, dir: 225, raining: true, pressure: 1006, elev: 5 }),
   ];
-  const homes = london ? ["Bloomsbury", "Southwark", "Islington", "Clapham", "Hackney", "Battersea", "Camden", "Greenwich", "Brixton", "Shoreditch"] : null;
-  for (let i = 0; i < 10; i++) {
-    const dx = (rnd(i) - 0.5) * 18, dy = (rnd(i + 50) - 0.5) * 14;
-    const wet = rnd(i + 90) > 0.45;
-    list.push(s({ id: `NA-${i}`, network: "netatmo", name: homes ? homes[i] : "Home station", ...at(dx, dy), time: t(3 + i), temp: Math.round((11.4 + rnd(i + 7) * 1.2) * 10) / 10, humidity: 86 + Math.round(rnd(i + 3) * 6),
-      rain1h: i % 3 === 0 ? (wet ? 0.3 + rnd(i) : 0) : null, raining: i % 3 === 0 ? wet : null, wind: i % 4 === 1 ? 10 + rnd(i) * 8 : null, dir: i % 4 === 1 ? 215 : null }));
-  }
   for (let i = 0; i < 7; i++) {
     const dx = (rnd(i + 200) - 0.5) * 40, dy = (rnd(i + 300) - 0.5) * 34;
     const wet = dx < 6;
@@ -1220,7 +1212,7 @@ function demoStations(lat, lon) {
   const count = (n) => list.filter((x) => x.network === n).length;
   return {
     stations: list, history, fetchedAt: new Date().toISOString(),
-    networks: Object.fromEntries(["airport", "metoffice", "netatmo", "raingauge"].map((n) => [n, { enabled: true, ok: true, count: count(n) }])),
+    networks: Object.fromEntries(["airport", "metoffice", "raingauge"].map((n) => [n, { enabled: true, ok: true, count: count(n) }])),
   };
 }
 
