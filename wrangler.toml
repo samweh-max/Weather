@@ -1,6 +1,8 @@
 name = "weather-compare"
 main = "worker/index.js"
 compatibility_date = "2025-09-01"
+# Keep variables added in the Cloudflare dashboard when deploying from here.
+keep_vars = true
 
 # The phone app (HTML/CSS/JS) is served from ./public; /api/* goes to the worker.
 [assets]

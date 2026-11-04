@@ -140,7 +140,7 @@ async function openMeteo({ lat, lon, tz }) {
         hi: v(d, "temperature_2m_max", i),
         lo: v(d, "temperature_2m_min", i),
         pop: v(d, "precipitation_probability_max", i),
-        mm: v(d, "precipitation_sum", i),
+        mm: noNeg(v(d, "precipitation_sum", i)),
         wind: v(d, "wind_speed_10m_max", i),
         gust: v(d, "wind_gusts_10m_max", i),
         dir: v(d, "wind_direction_10m_dominant", i),
@@ -163,6 +163,9 @@ async function openMeteo({ lat, lon, tz }) {
     return { id, name, note, ok, error: ok ? undefined : "No data for this place", elevation: num(data.elevation), days, hours };
   });
 }
+
+// Some models report tiny negative rain totals; treat them as dry.
+const noNeg = (x) => (x == null ? null : Math.max(0, x));
 
 function wmoCode(c) {
   if (c == null) return null;
