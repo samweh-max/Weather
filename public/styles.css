@@ -479,7 +479,7 @@ input[type="search"] {
 
 /* Tappable days on the Forecaster, and their details */
 button.drow { width: 100%; font: inherit; color: inherit; text-align: left; background: none; border: 0; border-top: 1px solid var(--line); cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.lead + button.drow { border-top: 0; }
+h2 + button.drow { border-top: 0; }
 button.drow.open .dl { color: var(--rain); }
 .dday { padding: 4px 0 14px; }
 .dgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-bottom: 8px; }
@@ -491,7 +491,7 @@ button.drow.open .dl { color: var(--rain); }
 
 /* Rain gauges: totals and a 24-hour timeline */
 button.srow { width: 100%; font: inherit; color: inherit; text-align: left; background: none; border: 0; border-top: 1px solid var(--line); cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.lead + button.srow { border-top: 0; }
+h2 + button.srow { border-top: 0; }
 .srow .r small { display: block; font-size: 10px; font-weight: 500; color: var(--faint); }
 .gdetail { padding: 2px 0 12px; }
 .rainline .gap { fill: var(--line); }
@@ -525,3 +525,19 @@ button.srow { width: 100%; font: inherit; color: inherit; text-align: left; back
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }
+
+/* Hourly charts: slide a finger along to read each hour */
+.chartwrap { position: relative; touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+.chartwrap .chart { display: block; }
+.scrub-line { stroke: var(--ink); stroke-width: 1.2; opacity: 0.55; }
+.scrub-dot { fill: var(--warm); stroke: var(--surface); stroke-width: 2; }
+.scrub-tip {
+  position: absolute; top: -30px; z-index: 2; display: flex; align-items: center; gap: 8px; white-space: nowrap;
+  padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
+  background: var(--ink); color: var(--surface); box-shadow: 0 4px 14px rgba(10, 20, 30, 0.2); pointer-events: none;
+}
+.scrub-tip .r { color: color-mix(in srgb, var(--rain) 55%, var(--surface)); }
+.scrub-tip .w { display: inline-flex; align-items: center; gap: 2px; color: color-mix(in srgb, var(--wind) 55%, var(--surface)); }
+.scrub-tip .w svg { width: 11px; height: 11px; }
+.panel > h2 + .chartwrap { margin-top: 34px; }
+.dday .chartwrap { margin-top: 34px; }
