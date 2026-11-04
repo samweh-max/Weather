@@ -522,10 +522,14 @@ function validTz(tz) {
 }
 
 async function getJson(url, opts = {}) {
-  const res = await fetch(url, opts);
+  // Some providers (the Met Office among them) refuse requests that don't say who is asking.
+  const headers = { "User-Agent": "weather-compare/1.0 (+https://github.com/samweh-max/Weather)", ...(opts.headers || {}) };
+  const res = await fetch(url, { ...opts, headers });
   if (!res.ok) {
     const hint = res.status === 401 || res.status === 403 ? " (check the API key)" : res.status === 429 || res.status === 503 ? " (daily limit reached?)" : "";
-    throw new Error(`Provider returned ${res.status}${hint}`);
+    // Pass on the provider's own short explanation, if it gave one.
+    const why = (await res.text().catch(() => "")).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
+    throw new Error(`Provider returned ${res.status}${hint}${why ? `: ${why}` : ""}`);
   }
   return res.json();
 }
