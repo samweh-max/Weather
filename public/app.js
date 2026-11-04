@@ -311,6 +311,7 @@ function render() {
   renderHeader();
   const page = state.page;
   document.querySelectorAll(".tabs button").forEach((b) => (b.dataset.page === page ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")));
+  placeTabBlob();
   $("#pageCompare").hidden = page !== "compare";
   $("#pageForecast").hidden = page !== "forecast";
   $("#pageStations").hidden = page !== "stations";
@@ -706,6 +707,21 @@ function goPage(p) {
   switchPage(p, () => { state.open = null; });
 }
 
+// Move the tab bar's bubble under the current page's button.
+let blobPage = null;
+function placeTabBlob() {
+  const blob = $(".tab-blob"), btn = $(`.tabs button[data-page="${state.page}"]`);
+  if (!blob || !btn) return;
+  blob.style.setProperty("--x", btn.offsetLeft + "px");
+  blob.style.setProperty("--w", btn.offsetWidth + "px");
+  if (blobPage && blobPage !== state.page && !blob.closest(".still")) {
+    blob.classList.remove("hop");
+    void blob.offsetWidth;
+    blob.classList.add("hop");
+  }
+  blobPage = state.page;
+}
+
 // Slide between pages: forward pages come in from the right, earlier ones from the left.
 // The sky panel morphs between its full and slim sizes while the page content slides.
 function switchPage(p, before) {
@@ -720,7 +736,10 @@ function switchPage(p, before) {
   document.documentElement.dataset.dir = to > from ? "fwd" : "back";
   if (still) return swap();
   if (document.startViewTransition) {
-    document.startViewTransition(swap);
+    // The view transition animates the bubble itself, so the live one jumps straight there.
+    const tabs = $(".tabs");
+    tabs.classList.add("still");
+    document.startViewTransition(swap).finished.finally(() => tabs.classList.remove("still"));
   } else {
     swap();
     const m = $("#main");
@@ -1373,6 +1392,8 @@ function init() {
   $("#search").oninput = onSearch;
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => goPage(b.dataset.page)));
   window.addEventListener("hashchange", () => switchPage(pageFromHash()));
+  window.addEventListener("resize", placeTabBlob);
+  if (document.fonts) document.fonts.ready.then(placeTabBlob);
   state.page = pageFromHash();
   document.querySelectorAll("#modes button").forEach((b) => (b.onclick = () => {
     state.mode = b.dataset.mode;

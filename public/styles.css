@@ -80,7 +80,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   font: 15px/1.4 var(--font-body);
-  padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
   -webkit-tap-highlight-color: transparent;
 }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
@@ -264,22 +264,42 @@ main { padding: 4px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, en
 .footer { text-align: center; font-size: 12px; color: var(--faint); margin: 18px 0 0; }
 
 
-/* ---------- Tab bar ---------- */
+/* ---------- Tab bar: a floating oval, with a bubble that hops to the chosen page ---------- */
 .tabs {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-  display: flex; justify-content: center; gap: 4px;
-  padding: 6px max(12px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
-  background: color-mix(in srgb, var(--surface) 86%, transparent);
-  backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4);
-  box-shadow: 0 -1px 0 var(--line);
+  position: fixed; z-index: 20;
+  left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px));
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  max-width: 420px; margin: 0 auto;
+  display: flex; padding: 6px; border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  backdrop-filter: blur(18px) saturate(1.5); -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  box-shadow: 0 10px 30px -8px rgba(10, 20, 30, 0.28), 0 2px 6px rgba(10, 20, 30, 0.08), inset 0 0 0 1px var(--line);
 }
 .tabs button {
-  flex: 0 1 140px; display: grid; justify-items: center; gap: 2px; padding: 6px 4px; min-height: 52px;
-  border-radius: 12px; color: var(--faint); font-size: 11px; font-weight: 600; letter-spacing: 0.01em;
+  position: relative; z-index: 1;
+  flex: 1 1 0; display: grid; justify-items: center; gap: 1px; padding: 7px 4px 6px; min-height: 50px;
+  border-radius: 999px; color: var(--faint); font-size: 11px; font-weight: 600; letter-spacing: 0.01em;
+  transition: color 0.25s ease;
 }
-.tabs svg { width: 22px; height: 22px; }
+.tabs svg { width: 22px; height: 22px; transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .tabs button[aria-current="page"] { color: var(--ink); }
-.tabs button[aria-current="page"] svg { color: var(--rain); }
+.tabs button[aria-current="page"] svg { color: var(--rain); transform: translateY(-1px) scale(1.08); }
+.tab-blob {
+  position: absolute; top: 6px; bottom: 6px; left: 0; width: var(--w, 0px);
+  transform: translateX(var(--x, 0px)); border-radius: 999px;
+  background: color-mix(in srgb, var(--rain) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rain) 22%, transparent);
+  transition: transform 0.5s cubic-bezier(0.34, 1.45, 0.64, 1), width 0.3s ease;
+  view-transition-name: tab-blob;
+}
+.tab-blob.hop { animation: hop 0.5s cubic-bezier(0.3, 0.7, 0.4, 1); }
+.tabs.still .tab-blob { transition: none; animation: none; }
+@keyframes hop {
+  0% { scale: 1 1; }
+  35% { scale: 1.12 0.82; }
+  65% { scale: 0.96 1.06; }
+  100% { scale: 1 1; }
+}
 
 /* ---------- Forecaster ---------- */
 .panel { background: var(--surface); border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--line); padding: 16px; margin-top: 12px; }
@@ -347,7 +367,7 @@ main { padding: 4px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, en
 /* ---------- Map ---------- */
 .map-panel { padding: 0; overflow: hidden; position: relative; }
 /* The map takes the screen below the slim sky bar, leaving the tab bar and the key visible. */
-.map { height: calc(100vh - 250px); height: calc(100dvh - 250px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); min-height: 340px; background: var(--track); }
+.map { height: calc(100vh - 266px); height: calc(100dvh - 266px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); min-height: 340px; background: var(--track); }
 .map-msg { display: grid; place-items: center; height: 100%; padding: 24px; text-align: center; color: var(--muted); font-size: 14px; }
 .map-bar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 650; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none; }
 .chip-btn {
@@ -483,6 +503,10 @@ button.srow { width: 100%; font: inherit; color: inherit; text-align: left; back
 .sky { view-transition-name: sky; }
 .tabs { view-transition-name: tabs; }
 ::view-transition-group(*) { animation-duration: 0.38s; animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
+/* The tab bubble hops across during a page change instead of fading. */
+::view-transition-group(tab-blob) { animation-duration: 0.5s; animation-timing-function: cubic-bezier(0.34, 1.45, 0.64, 1); }
+::view-transition-old(tab-blob) { display: none; }
+::view-transition-new(tab-blob) { animation: hop 0.5s cubic-bezier(0.3, 0.7, 0.4, 1); }
 ::view-transition-old(page) { animation: page-out 0.24s cubic-bezier(0.4, 0, 1, 1) both; }
 ::view-transition-new(page) { animation: page-in 0.38s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 /* The sky keeps its natural size and is clipped as it grows or shrinks, so its text never stretches. */
