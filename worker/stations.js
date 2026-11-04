@@ -238,7 +238,9 @@ function rh(t, td) {
   return Math.min(100, (100 * f(td)) / f(t));
 }
 async function getJson(url, opts = {}) {
-  const res = await fetch(url, opts);
+  // Some providers (the Met Office among them) refuse requests that don't say who is asking.
+  const headers = { "User-Agent": "weather-compare/1.0 (+https://github.com/samweh-max/Weather)", ...(opts.headers || {}) };
+  const res = await fetch(url, { ...opts, headers });
   if (!res.ok) throw new Error(`Returned ${res.status}${res.status === 401 || res.status === 403 ? " (check the key)" : ""}`);
   return res.json();
 }
