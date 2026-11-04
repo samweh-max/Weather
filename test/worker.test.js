@@ -136,6 +136,10 @@ test("map key is passed on only when set", async () => {
   assert.equal((await call("/api/map", { CARTO_KEY: "k" })).body.cartoKey, "k");
 });
 
+test("pasted keys are cleaned of spaces and line breaks", async () => {
+  assert.equal((await call("/api/map", { CARTO_KEY: ' "ab\n cd" ' })).body.cartoKey, "abcd");
+});
+
 test("keyed source without a key is refused", async () => {
   const { status } = await call(q("accuweather"), {});
   assert.equal(status, 400);

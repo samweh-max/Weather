@@ -20,8 +20,18 @@ const SOURCES = {
   openweather: { key: "OPENWEATHER_KEY", ttl: 1800, fetch: openWeather },
 };
 
+// Keys pasted into Cloudflare can pick up spaces, line breaks or quotes; API keys never contain those.
+function cleanKeys(env) {
+  const out = { ...env };
+  for (const [k, v] of Object.entries(env)) {
+    if (/_KEY$/.test(k) && typeof v === "string") out[k] = v.replace(/[\s"']/g, "");
+  }
+  return out;
+}
+
 export default {
   async fetch(request, env, ctx) {
+    env = cleanKeys(env);
     const url = new URL(request.url);
     try {
       if (url.pathname === "/api/sources") {
