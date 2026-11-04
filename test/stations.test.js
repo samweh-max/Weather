@@ -72,6 +72,10 @@ test("rain gauges add up the last hour and drop stale gauges", async () => {
   const g = r.stations.filter((s) => s.network === "raingauge");
   assert.equal(g.length, 1);
   assert.equal(g[0].rain1h, 0.8);
+  assert.equal(g[0].rain24h, 2.8, "every reading in the last day");
+  assert.equal(g[0].hourly.length, 24);
+  assert.equal(g[0].hourly[23].mm, 0.8, "latest hour last");
+  assert.equal(g[0].hourly.reduce((a, h) => a + (h.mm || 0), 0).toFixed(1), "2.8");
   assert.equal(g[0].raining, true);
 });
 
