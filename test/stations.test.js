@@ -1,7 +1,7 @@
 // Station readers, run against sample responses (no network needed).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stationsNear, distKm } from "../worker/stations.js";
+import { stationsNear, distKm, geohashCentre } from "../worker/stations.js";
 
 const now = Math.floor(Date.now() / 1000);
 const iso = (secAgo) => new Date((now - secAgo) * 1000).toISOString();
@@ -94,6 +94,12 @@ test("Met Office observations use their own key and convert knots", async () => 
   assert.ok(Math.abs(mo.wind - 9.26) < 0.1);
   assert.equal(mo.dir, 67.5);
   assert.equal(mo.raining, true);
+  assert.ok(Math.abs(mo.lat - 51.50) < 0.02 && Math.abs(mo.lon + 0.13) < 0.02, "placed on the map from its geohash");
+});
+
+test("geohash centre", () => {
+  const c = geohashCentre("gcpvj0");
+  assert.ok(Math.abs(c.lat - 51.50) < 0.01 && Math.abs(c.lon + 0.13) < 0.01);
 });
 
 test("Netatmo home stations, with outliers removed", async () => {
