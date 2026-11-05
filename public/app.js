@@ -953,16 +953,27 @@ function recordSnapshot() {
   const providers = PROVIDERS.map((p) => state.results[p.id]).filter(Boolean);
   if (!providers.length) return;
   const key = snapKey();
-  const snaps = store.get(key, []);
+  let snaps = store.get(key, []);
+  // First check the forecasts saved earlier against what stations measured since, and add
+  // the results to this area's long-term track record.
+  const st = state.stations;
+  if (st && (st.history || (st.stations || []).length)) {
+    const truth = Blend.truthFrom(st.history, st.stations, (iso) => Blend.toLocalKey(iso, state.place.tz || "UTC"));
+    const done = Blend.learn(store.get(ledgerKey(), null), snaps, truth, nowKey());
+    store.set(ledgerKey(), done.ledger);
+    snaps = done.snaps;
+  }
   const snap = Blend.snapshot(providers, nowKey());
-  if (snaps.length && snaps[snaps.length - 1].issued === snap.issued) return;
-  snaps.push(snap);
+  if (!snaps.length || snaps[snaps.length - 1].issued !== snap.issued) snaps.push(snap);
   store.set(key, snaps.slice(-36));
 }
 
 // Forecast history is kept per ~10 km area, so it survives small moves of the phone.
 function snapKey() {
   return `wc.snap.${state.place.lat.toFixed(1)},${state.place.lon.toFixed(1)}`;
+}
+function ledgerKey() {
+  return `wc.ledger.${state.place.lat.toFixed(1)},${state.place.lon.toFixed(1)}`;
 }
 function placeElev() {
   const r = PROVIDERS.map((p) => state.results[p.id]).find((x) => x && x.elevation != null);
@@ -974,12 +985,8 @@ function prediction() {
   const providers = visibleProviders().map((p) => state.results[p.id]).filter((r) => r && r.ok);
   if (!providers.length) return null;
   const st = state.stations || {};
-  let skill = null;
-  if (st.history && st.history.obs) {
-    const hist = st.history.obs.map((o) => ({ key: Blend.toLocalKey(o.time, state.place.tz || "UTC"), temp: o.temp }));
-    skill = Blend.scoreSkill(store.get(snapKey(), []), hist);
-  }
-  return Blend.predict({ providers, stations: st.stations || [], nowKey: nowKey(), skill, reports: store.get(rateKey(), []), placeElev: placeElev(), hours: 168 });
+  const skill = Blend.skillFrom(store.get(ledgerKey(), null));
+  return Blend.predict({ providers, stations: st.stations || [], nowKey: nowKey(), skill, reports: store.get(rateKey(), []), placeElev: placeElev(), place: state.place, hours: 168 });
 }
 
 // ---------- Rate the forecast ----------
@@ -1088,6 +1095,7 @@ function forecastNotes(pred) {
     s += ".";
     const adj = fmt.tempDiff(pred.now.tempAdj);
     if (Math.abs(adj) >= 1) s += ` That's ${Math.abs(adj)}° ${adj < 0 ? "cooler" : "warmer"} than the sources expected, so the next few hours are adjusted to match.`;
+    if (pred.now.upwind && pred.now.rain !== "raining") s += ` Rain is falling ${fmt.dist(pred.now.upwind.dist)} upwind and could reach you in about ${pred.now.upwind.hours} hour${pred.now.upwind.hours === 1 ? "" : "s"}.`;
     out.push(s);
   }
   // Rain windows in the next 24 hours.
@@ -1197,19 +1205,20 @@ function renderForecastPage() {
   }
   const notes = forecastNotes(pred).map((p) => `<p>${esc(p)}</p>`).join("");
   const basisText = {
-    past: `Sources are weighted by how close their forecasts came to what <b>${esc(state.stations?.history?.name || "the nearest airport")}</b> actually measured over the last day${pred.reports ? ", and to what you reported" : ""}.`,
-    now: `Sources are weighted by how close they are to what <b>${pred.now.obs.tempN} nearby station${pred.now.obs.tempN === 1 ? "" : "s"}</b> read right now. As this phone saves more forecasts, the weights will switch to each source's track record over the past day.`,
+    past: `Sources are weighted by their track record here. Forecasts this phone saved are checked against what <b>${esc(state.stations?.history?.name || "the nearest airport")}</b> measured (temperature and wind) and what nearby <b>rain gauges</b> collected (rain)${pred.reports ? ", and against what you reported" : ""}. Each gets its own weights, recent weeks count most, and any warm or cold lean is corrected separately for day and night.`,
+    now: `Sources are weighted by how close they are to what <b>${pred.now.obs.tempN} nearby station${pred.now.obs.tempN === 1 ? "" : "s"}</b> read right now. Each time you open the app, its forecasts are saved and later checked against airports and rain gauges, so the weights soon switch to each source's track record here.`,
     equal: "No station readings are available here yet, so every source counts equally.",
   }[pred.basis];
   const wrows = pred.weights.map((w) => {
     const lean = w.bias && Math.abs(fmt.tempDiff(w.bias)) >= 1 ? `, runs ${Math.abs(fmt.tempDiff(w.bias))}° ${w.bias > 0 ? "warm" : "cold"} here (corrected)` : "";
     let detail = w.basis === "past" && w.err != null ? `${fmt.tempDiff(w.err) || "<1"}° off on average${lean}` : w.basis === "now" && w.err != null ? `${Math.round(fmt.tempDiff(w.err) * 10) / 10}° from stations now` : "";
+    if (w.basis === "past" && w.rain != null) detail += `${detail ? " · " : ""}rain ${w.rain < 0.08 ? "very good" : w.rain < 0.15 ? "good" : w.rain < 0.22 ? "fair" : "poor"}`;
     if (w.rated && w.rated.match != null) detail += `${detail ? " · " : ""}matched your reports ${Math.round(w.rated.match * 100)}%`;
     return `<div class="wrow"><div class="nm"><b>${esc(w.name)}</b><small>${detail}</small></div><div class="track"><i style="width:${(w.w / pred.weights[0].w) * 100}%"></i></div><div class="pc">${Math.round(w.w * 100)}%</div></div>`;
   }).join("");
   const adj = fmt.tempDiff(pred.now.tempAdj);
   const nowText = pred.now.obs.temp != null
-    ? `<p class="how">Right now: <b>${fmt.temp(pred.now.obs.temp)}</b> measured nearby${Math.abs(adj) >= 1 ? `, so the next few hours are moved <b>${adj > 0 ? "up" : "down"} ${Math.abs(adj)}°</b>, easing back to the blend by about 12 hours out` : ", close to what the sources expected"}.${pred.now.rain === "raining" ? " Rain gauges show it raining, so the next couple of hours lean wet." : pred.now.rain === "dry" ? " Rain gauges are dry, so the next couple of hours lean dry." : ""}</p>`
+    ? `<p class="how">Right now: <b>${fmt.temp(pred.now.obs.temp)}</b> measured nearby${Math.abs(adj) >= 1 ? `, so the next few hours are moved <b>${adj > 0 ? "up" : "down"} ${Math.abs(adj)}°</b>, easing back to the blend by about 12 hours out` : ", close to what the sources expected"}.${pred.now.rain === "raining" ? " Rain gauges show it raining, so the next couple of hours lean wet." : pred.now.rain === "dry" ? " Rain gauges are dry, so the next couple of hours lean dry." : ""}${pred.now.upwind ? ` Rain is falling ${fmt.dist(pred.now.upwind.dist)} upwind, so it could arrive in about <b>${pred.now.upwind.hours} hour${pred.now.upwind.hours === 1 ? "" : "s"}</b>.` : ""}</p>`
     : "";
 
   const scale = { min: Math.min(...pred.days.map((d) => d.lo)), max: Math.max(...pred.days.map((d) => d.hi)) };

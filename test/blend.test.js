@@ -120,3 +120,52 @@ test("reported temperatures count towards each source's warm or cold lean", () =
   assert.equal(Math.round(wr.bias), 4);
   assert.ok(Math.abs(r.hours[0].temp - 10) < 0.5, String(r.hours[0].temp));
 });
+
+test("saved forecasts are checked against airports and rain gauges, and build a lasting track record", () => {
+  const { truthFrom, learn, skillFrom } = globalThis.Blend;
+  const toKey = (iso) => iso.slice(0, 16);
+  const obs = [], hourly = [];
+  for (let i = 0; i < 24; i++) {
+    const t = new Date(Date.parse("2026-11-03T12:00:00Z") + i * 3600e3).toISOString();
+    obs.push({ time: t, temp: 10, wind: 20 });
+    hourly.push({ time: new Date(Date.parse(t) + 3600e3).toISOString(), mm: i % 2 ? 1 : 0 });
+  }
+  const truth = truthFrom({ obs }, [{ network: "raingauge", dist: 3, hourly }], toKey);
+  const snaps = [];
+  for (let i = 0; i < 20; i++) {
+    const hk = new Date(Date.parse("2026-11-03T12:00:00Z") + i * 3600e3).toISOString().slice(0, 13);
+    const wet = i % 2 === 1;
+    snaps.push({ issued: new Date(Date.parse(hk + ":00Z") - 3 * 3600e3).toISOString().slice(0, 16), f: {
+      good: { [hk]: { t: 10, p: wet ? 90 : 10, w: 20 } },
+      warm: { [hk]: { t: 13, p: wet ? 10 : 90, w: 35 } },
+    } });
+  }
+  const { ledger, snaps: left } = learn(null, snaps, truth, "2026-11-04T12:00");
+  assert.equal(left.length, 0, "checked hours are used up");
+  const sk = skillFrom(ledger);
+  assert.equal(Math.round(sk.warm.bias), 3);
+  assert.ok(sk.good.rain.brier < 0.05 && sk.warm.rain.brier > 0.5);
+  assert.equal(Math.round(sk.warm.wind.bias), 15);
+  // Ten days later the same record counts half as much.
+  const later = learn(ledger, [], new Map(), "2026-11-14T12:00").ledger;
+  assert.ok(Math.abs(skillFrom(later).warm.n - sk.warm.n / 2) < 0.01);
+  // Rain weights follow the rain record, not the temperature one.
+  const r = predict({ providers: [src("good", 10, { pop: 80 }), src("warm", 13, { pop: 0 })], stations: [], nowKey, skill: sk });
+  const w = Object.fromEntries(r.weights.map((x) => [x.id, x]));
+  assert.ok(w.good.wr > 0.9);
+  assert.ok(r.hours[3].pop > 70);
+  assert.ok(Math.abs(r.hours[3].temp - 10) < 0.01, "the warm source's lean is corrected");
+});
+
+test("rain seen upwind is timed to arrive with the wind", () => {
+  const place = { lat: 51.5, lon: 0 };
+  // Wind from the west at 20 km/h; a wet gauge 40 km west, a dry one 40 km east.
+  const st = [
+    { network: "airport", dist: 3, lat: 51.5, lon: 0.04, time: new Date().toISOString(), temp: 10, wind: 20, dir: 270, raining: false },
+    { network: "raingauge", dist: 40, lat: 51.5, lon: -0.576, time: new Date().toISOString(), raining: true },
+    { network: "raingauge", dist: 40, lat: 51.5, lon: 0.576, time: new Date().toISOString(), raining: false },
+  ];
+  const r = predict({ providers: [src("a", 10, { pop: 5 })], stations: st, nowKey, place });
+  assert.equal(r.now.upwind.hours, 2);
+  assert.ok(r.hours[2].pop > 30 && r.hours[8].pop < 10);
+});
