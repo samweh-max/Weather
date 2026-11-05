@@ -1,5 +1,5 @@
 // Keeps the app shell available offline. Forecasts (/api/*) always go to the network.
-const CACHE = "wc-shell-v20";
+const CACHE = "wc-shell-v21";
 const SHELL = ["./", "index.html", "styles.css", "blend.js", "map.js", "app.js", "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {
