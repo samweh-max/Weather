@@ -20,6 +20,27 @@
 </head>
 <body>
   <!-- APP:START -->
+  <!-- Stations page: the globe fills the page behind everything; the cards sit on a sheet above it. -->
+  <div id="globeLayer" class="globe-layer" hidden>
+    <div class="globe-fx" aria-hidden="true"></div>
+    <div id="map" class="map" role="application" aria-label="Map of weather stations"></div>
+    <div class="globe-shade" aria-hidden="true"></div>
+    <div class="map-bar">
+      <button id="radarBtn" class="chip-btn" aria-pressed="false">Rain radar</button>
+      <button id="radarPlay" class="chip-btn" hidden><span>Play</span> · <span id="radarTime"></span></button>
+      <div id="mapStyle" class="map-style" role="group" aria-label="Map style">
+        <button data-style="map" aria-pressed="true">Map</button>
+        <button data-style="sat" aria-pressed="false">Satellite</button>
+      </div>
+      <button id="globeBtn" class="chip-btn" aria-label="Zoom out to the globe">
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.6 2.5 3.9 5.5 3.9 9s-1.3 6.5-3.9 9c-2.6-2.5-3.9-5.5-3.9-9S9.4 5.5 12 3z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+      </button>
+      <button id="recentre" class="chip-btn" aria-label="Zoom in to stations near you">
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 21 3l-8 18-2-8z" fill="currentColor"/></svg><span>Stations near me</span>
+      </button>
+    </div>
+  </div>
+
   <section id="sky" class="sky" data-code="cloudy">
     <canvas id="skyCanvas" aria-hidden="true"></canvas>
     <div class="sky-inner">
@@ -58,21 +79,16 @@
     </div>
     <div id="pageForecast" hidden></div>
     <div id="pageStations" hidden>
-      <section class="panel map-panel">
-        <div id="map" class="map" role="application" aria-label="Map of weather stations"></div>
-        <div class="map-bar">
-          <button id="radarBtn" class="chip-btn" aria-pressed="false">Rain radar</button>
-          <button id="radarPlay" class="chip-btn" hidden><span>Play</span> · <span id="radarTime"></span></button>
-          <button id="recentre" class="chip-btn" aria-label="Back to my place">
-            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 21 3l-8 18-2-8z" fill="currentColor"/></svg>
-          </button>
-        </div>
-        <div class="map-key">
+      <div class="st-sheet">
+        <div class="st-handle" role="button" tabindex="0" aria-label="Drag down to see more of the map">
+          <i class="grab" aria-hidden="true"></i>
+          <div class="map-key">
           <span><i class="k-off"></i>Airport or Met Office</span>
           <span><i class="k-drop"></i>Rain gauge (blue when wet)</span>
         </div>
-      </section>
-      <div id="stationsList"></div>
+        </div>
+        <div id="stationsList"></div>
+      </div>
     </div>
     <p id="footer" class="footer"></p>
   </main>
@@ -130,6 +146,29 @@
     <h3>Sources</h3>
     <ul id="sourceToggles" class="toggles"></ul>
     <p class="fine">BBC Weather and Apple Weather aren't included. BBC has no public API, and Apple's needs a paid developer account.</p>
+  </dialog>
+  <dialog id="rateSheet" class="sheet rate">
+    <div class="sheet-head">
+      <h2>What's it like outside?</h2>
+      <button class="close" data-close aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3 3 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="rate-form">
+      <p id="rateSub" class="rate-sub"></p>
+      <h3>Sky</h3>
+      <div id="rateSky" class="rate-sky"></div>
+      <h3>Temperature <span>optional</span></h3>
+      <div id="rateTempMode" class="rseg"><button data-v="colder">Colder</button><button data-v="right">About right</button><button data-v="warmer">Warmer</button></div>
+      <div id="rateTempRow" class="rate-step" hidden><button data-d="-1" aria-label="Colder by one degree">−</button><output id="rateTempVal"></output><button data-d="1" aria-label="Warmer by one degree">+</button></div>
+      <h3>Wind <span>optional</span></h3>
+      <div id="rateWind" class="rseg"><button data-v="calm">Calm</button><button data-v="breezy">Breezy</button><button data-v="windy">Windy</button></div>
+      <button id="rateSend" class="rate-send" disabled>Send</button>
+    </div>
+    <div class="rate-done">
+      <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="3"/><path d="m14 25 7 7 13-15" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <p id="rateThanks"></p>
+    </div>
   </dialog>
   <!-- APP:END -->
 

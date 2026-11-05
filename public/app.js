@@ -318,6 +318,10 @@ function render() {
   $("#days").hidden = page !== "compare";
   // On the Stations page the sky panel shrinks to a slim bar so the map gets the room.
   $("#sky").classList.toggle("compact", page === "stations");
+  // On Stations the globe fills the page behind everything and the cards sit on a sheet above it.
+  $("#globeLayer").hidden = page !== "stations";
+  document.body.classList.toggle("on-globe", page === "stations");
+  if (page === "stations") setSheetTop(sheetTarget());
   if (page === "forecast") {
     const pred = renderForecastPage();
     if (pred && pred.days.length) applyHero(heroForecast(pred));
@@ -388,27 +392,68 @@ function placeClock(t) {
   }
 }
 
-const SUN_UP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h16M7 14a5 5 0 0 1 10 0M12 4v4M9.5 6.5 12 4l2.5 2.5M4.9 9.9l1.4 1.4M19.1 9.9l-1.4 1.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const SUN_DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h16M7 14a5 5 0 0 1 10 0M12 3.5v4.5M9.5 5.5 12 8l2.5-2.5M4.9 9.9l1.4 1.4M19.1 9.9l-1.4 1.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 // A day-long strip from midnight to midnight: night, the glow of sunrise, daylight, sunset, night.
 // On today it also shows where the sun is right now.
+// How high the sun is in the sky (degrees above the horizon) at a moment, at a place.
+function sunElevation(t, lat, lon) {
+  const rad = Math.PI / 180, d = t / 864e5 - 10957.5;
+  const g = rad * (357.529 + 0.98560028 * d), q = 280.459 + 0.98564736 * d;
+  const L = rad * (q + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g));
+  const e = rad * (23.439 - 0.00000036 * d);
+  const ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L));
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const gmst = (18.697374558 + 24.06570982441908 * d) * 15;
+  const H = rad * (gmst + lon) - ra;
+  return Math.asin(Math.sin(lat * rad) * Math.sin(dec) + Math.cos(lat * rad) * Math.cos(dec) * Math.cos(H)) / rad;
+}
+
+// The day's sun as a gentle wave from midnight to midnight: the real height of the sun through
+// the day, crossing a horizon line at sunrise and sunset. Daylight glows above the line, night
+// fades below it, and today a soft sun (or a dim one after dark) sits where the sun is now.
 function sunBar(date) {
   if (!state.place || !date) return "";
-  const t = sunTimes(date, state.place.lat, state.place.lon);
+  const { lat, lon } = state.place;
+  const t = sunTimes(date, lat, lon);
   if (t.polar) return `<div class="sun"><div class="sun-lbl one">${t.polar === "day" ? "The sun doesn't set today" : "The sun doesn't rise today"}</div></div>`;
   const r = placeClock(t.rise), st = placeClock(t.set);
-  const a = (r.mins / 1440) * 100, b = (st.mins / 1440) * 100;
   const len = st.mins - r.mins;
-  let dot = "";
+  const midnight = t.rise.getTime() - r.mins * 60e3;
+  const W = 340, H = 36, base = 24, up = 20, down = 8;
+  const pts = [];
+  for (let m = 0; m <= 1440; m += 10) pts.push([m, sunElevation(midnight + m * 60e3, lat, lon)]);
+  const hi = Math.max(...pts.map((p) => p[1]), 1), lo = Math.min(...pts.map((p) => p[1]), -1);
+  const X = (m) => (m / 1440) * W;
+  const Y = (el) => base - (el >= 0 ? (el / hi) * up : (el / -lo) * down);
+  const line = pts.map(([m, el], i) => `${i ? "L" : "M"}${X(m).toFixed(1)} ${Y(el).toFixed(1)}`).join("");
+  const id = "sun" + (++chartSeq);
+  let g = `<defs>
+      <clipPath id="${id}a"><rect x="0" y="0" width="${W}" height="${base}"/></clipPath>
+      <clipPath id="${id}b"><rect x="0" y="${base}" width="${W}" height="${H - base}"/></clipPath>
+      <linearGradient id="${id}f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+      <radialGradient id="${id}g"><stop offset="0" stop-color="#fff7e8" stop-opacity=".95"/><stop offset=".45" stop-color="#ffe6c2" stop-opacity=".35"/><stop offset="1" stop-color="#ffe6c2" stop-opacity="0"/></radialGradient>
+    </defs>`;
+  g += `<path d="${line}L${W} ${base}L0 ${base}Z" fill="url(#${id}f)" clip-path="url(#${id}a)"/>`;
+  g += `<path class="night" d="${line}" clip-path="url(#${id}b)"/>`;
+  g += `<path class="day" d="${line}" clip-path="url(#${id}a)"/>`;
+  g += `<line class="hz" x1="0" x2="${W}" y1="${base}" y2="${base}"/>`;
+  g += `<circle class="edge" cx="${X(r.mins).toFixed(1)}" cy="${base}" r="1.8"/><circle class="edge" cx="${X(st.mins).toFixed(1)}" cy="${base}" r="1.8"/>`;
   if (date === placeToday()) {
     const now = placeClock(new Date()).mins;
-    const up = now > r.mins && now < st.mins;
-    dot = `<span class="sun-now ${up ? "up" : "down"}" style="left:${((now / 1440) * 100).toFixed(1)}%" title="Now"></span>`;
+    const el = sunElevation(midnight + now * 60e3, lat, lon);
+    const x = X(now).toFixed(1), y = Y(el).toFixed(1);
+    g += el > 0
+      ? `<circle cx="${x}" cy="${y}" r="9" fill="url(#${id}g)"/><circle class="sun-dot" cx="${x}" cy="${y}" r="3.5"/>`
+      : `<circle class="moon-dot" cx="${x}" cy="${y}" r="2.5"/>`;
   }
-  return `<div class="sun" aria-label="Sunrise ${r.text}, sunset ${st.text}">
-      <div class="sun-track" style="--a:${a.toFixed(1)}%;--b:${b.toFixed(1)}%"><span class="sun-day"></span>${dot}</div>
-      <div class="sun-lbl"><span>${SUN_UP}${r.text}</span><span class="len">${Math.floor(len / 60)} h ${len % 60} min of daylight</span><span>${st.text}${SUN_DOWN}</span></div>
+  const dl = `${Math.floor(len / 60)} h ${String(len % 60).padStart(2, "0")} min`;
+  return `<div class="sun" aria-label="Sunrise ${r.text}, sunset ${st.text}, ${dl} of daylight">
+      <svg class="sun-wave" viewBox="0 0 ${W} ${H}" aria-hidden="true">${g}</svg>
+      <div class="sun-lbl">
+        <span>Sunrise <b>${r.text}</b></span>
+        <span class="len">${dl} of daylight</span>
+        <span>Sunset <b>${st.text}</b></span>
+      </div>
     </div>`;
 }
 
@@ -784,6 +829,8 @@ function switchPage(p, before) {
   };
   const still = from === to || matchMedia("(prefers-reduced-motion: reduce)").matches;
   document.documentElement.dataset.dir = to > from ? "fwd" : "back";
+  document.documentElement.dataset.to = p;
+  document.documentElement.dataset.from = state.page;
   if (still) return swap();
   if (document.startViewTransition) {
     // The view transition animates the bubble itself, so the live one jumps straight there.
@@ -797,6 +844,62 @@ function switchPage(p, before) {
     void m.offsetWidth;
     m.classList.add("page-in");
   }
+}
+
+// ---------- Stations sheet ----------
+// The cards on the Stations page sit on a sheet over the globe. Drag its handle down to see
+// more of the map (it settles low, showing just its top), drag it up or tap to bring it back.
+
+let sheetLow = false;
+const sheetTarget = () => Math.round(sheetLow ? window.innerHeight - 150 : window.innerHeight * 0.6);
+function setSheetTop(px) {
+  document.documentElement.style.setProperty("--sheet-top", px + "px");
+}
+function settleSheet(low) {
+  sheetLow = low;
+  const page = $("#pageStations");
+  page.classList.add("settling");
+  setSheetTop(sheetTarget());
+  $(".st-handle").setAttribute("aria-label", low ? "Drag up to show the stations" : "Drag down to see more of the map");
+  if (window.StationMap) StationMap.refit(true);
+  clearTimeout(settleSheet.t);
+  settleSheet.t = setTimeout(() => page.classList.remove("settling"), 500);
+}
+function initSheetDrag() {
+  const h = $(".st-handle");
+  if (!h) return;
+  let y0 = null, top0 = 0, moved = false, lastY = 0, lastT = 0, v = 0;
+  h.addEventListener("pointerdown", (e) => {
+    if (window.scrollY > 4) return;
+    y0 = e.clientY; top0 = sheetTarget(); moved = false; lastY = e.clientY; lastT = e.timeStamp; v = 0;
+    h.setPointerCapture(e.pointerId);
+    $("#pageStations").classList.remove("settling");
+  });
+  h.addEventListener("pointermove", (e) => {
+    if (y0 == null) return;
+    const dy = e.clientY - y0;
+    if (Math.abs(dy) > 4) moved = true;
+    v = (e.clientY - lastY) / Math.max(1, e.timeStamp - lastT);
+    lastY = e.clientY; lastT = e.timeStamp;
+    // Follow the finger, with some resistance past the ends.
+    const lo = window.innerHeight * 0.6, hi = window.innerHeight - 150;
+    let t = top0 + dy;
+    if (t < lo) t = lo - (lo - t) * 0.3;
+    if (t > hi) t = hi + (t - hi) * 0.3;
+    setSheetTop(Math.round(t));
+  });
+  const end = (e) => {
+    if (y0 == null) return;
+    const dy = e.clientY - y0;
+    y0 = null;
+    if (!moved) return settleSheet(!sheetLow); // a tap flips it
+    // A flick decides; otherwise go to whichever end is nearer.
+    const low = Math.abs(v) > 0.4 ? v > 0 : top0 + dy > (window.innerHeight * 0.6 + window.innerHeight - 150) / 2;
+    settleSheet(low);
+  };
+  h.addEventListener("pointerup", end);
+  h.addEventListener("pointercancel", end);
+  h.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); settleSheet(!sheetLow); } });
 }
 
 // ---------- Stations data and the Forecaster ----------
@@ -851,7 +954,102 @@ function prediction() {
     const hist = st.history.obs.map((o) => ({ key: Blend.toLocalKey(o.time, state.place.tz || "UTC"), temp: o.temp }));
     skill = Blend.scoreSkill(store.get(snapKey(), []), hist);
   }
-  return Blend.predict({ providers, stations: st.stations || [], nowKey: nowKey(), skill, placeElev: placeElev(), hours: 168 });
+  return Blend.predict({ providers, stations: st.stations || [], nowKey: nowKey(), skill, reports: store.get(rateKey(), []), placeElev: placeElev(), hours: 168 });
+}
+
+// ---------- Rate the forecast ----------
+// People say what the weather is really like; each report is kept with what every source
+// forecast for that hour, and the Forecaster leans towards the sources that match.
+
+const RATE_SKY = ["clear", "partly", "cloudy", "fog", "drizzle", "rain", "heavy-rain", "snow", "thunder"];
+const RATE_AGAIN = 3 * 3600e3; // the button goes quiet for three hours after a report
+function rateKey() {
+  return `wc.rate.${state.place.lat.toFixed(1)},${state.place.lon.toFixed(1)}`;
+}
+function lastRated() {
+  const list = state.place ? store.get(rateKey(), []) : [];
+  return list.length ? Date.parse(list[list.length - 1].saved) || 0 : 0;
+}
+function rateChip() {
+  const done = Date.now() - lastRated() < RATE_AGAIN;
+  return done
+    ? `<button class="rate-chip done" data-rate aria-label="You rated this forecast. Rate again">${CHECK}Rated</button>`
+    : `<button class="rate-chip" data-rate>${STAR}Rate now</button>`;
+}
+const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.6 2.5 5.2 5.7.8-4.1 4 1 5.7L12 16.6l-5.1 2.7 1-5.7-4.1-4 5.7-.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+const rate = { code: null, tempMode: null, temp: null, wind: null, base: null };
+
+function openRate(pred) {
+  const h = pred && pred.hours[0];
+  if (!h) return;
+  const night = Number(placeHour()) < 7 || Number(placeHour()) >= 18;
+  Object.assign(rate, { code: null, tempMode: null, temp: null, wind: null, base: h.temp });
+  const sheet = $("#rateSheet");
+  sheet.classList.remove("thanks");
+  $("#rateSub").textContent = `Forecaster has ${fmt.temp(h.temp)} and ${(WORDS[h.code] || "cloudy").toLowerCase()} for now.`;
+  $("#rateSky").innerHTML = RATE_SKY.map((c) =>
+    `<button data-code="${c}" aria-pressed="false">${wxIcon(c, night && (c === "clear" || c === "partly"), "ri")}<span>${c === "clear" && night ? "Clear" : WORDS[c]}</span></button>`).join("");
+  $("#rateSky").onclick = (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    rate.code = b.dataset.code;
+    $("#rateSky").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    $("#rateSend").disabled = false;
+  };
+  const shown = (c) => (state.settings.temp === "F" ? c * 9 / 5 + 32 : c);
+  const step = state.settings.temp === "F" ? 5 / 9 : 1;
+  const paintTemp = () => {
+    $("#rateTempRow").hidden = rate.tempMode == null;
+    $("#rateTempVal").textContent = rate.temp != null ? Math.round(shown(rate.temp)) + "°" : "";
+  };
+  document.querySelectorAll("#rateTempMode button").forEach((b) => {
+    b.setAttribute("aria-pressed", "false");
+    b.onclick = () => {
+      const m = b.dataset.v;
+      rate.tempMode = rate.tempMode === m ? null : m;
+      rate.temp = rate.tempMode == null ? null : rate.base + { colder: -2 * step, right: 0, warmer: 2 * step }[m];
+      document.querySelectorAll("#rateTempMode button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === rate.tempMode)));
+      paintTemp();
+    };
+  });
+  document.querySelectorAll("#rateTempRow button").forEach((b) => (b.onclick = () => {
+    rate.temp += Number(b.dataset.d) * step;
+    const d = rate.temp - rate.base;
+    rate.tempMode = Math.abs(d) < step / 2 ? "right" : d < 0 ? "colder" : "warmer";
+    document.querySelectorAll("#rateTempMode button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === rate.tempMode)));
+    paintTemp();
+  }));
+  document.querySelectorAll("#rateWind button").forEach((b) => {
+    b.setAttribute("aria-pressed", "false");
+    b.onclick = () => {
+      rate.wind = rate.wind === b.dataset.v ? null : b.dataset.v;
+      document.querySelectorAll("#rateWind button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === rate.wind)));
+    };
+  });
+  $("#rateSend").disabled = true;
+  $("#rateSend").onclick = sendRate;
+  paintTemp();
+  sheet.showModal();
+}
+
+function sendRate() {
+  if (!rate.code || !state.place) return;
+  const providers = visibleProviders().map((p) => state.results[p.id]).filter((r) => r && r.ok);
+  const report = Blend.reportFrom(providers, nowKey(), { code: rate.code, temp: rate.temp != null ? Math.round(rate.temp * 10) / 10 : null, wind: rate.wind });
+  report.saved = new Date().toISOString();
+  const list = store.get(rateKey(), []);
+  list.push(report);
+  store.set(rateKey(), list.slice(-60));
+  const n = Math.min(list.length, 60);
+  $("#rateThanks").textContent = n === 1
+    ? "Thanks! That's your first report here. The more you add, the better the Forecaster gets to know your spot."
+    : `Thanks! That's ${n} reports here. Sources that match what you see now count for more.`;
+  const sheet = $("#rateSheet");
+  sheet.classList.add("thanks");
+  render();
+  setTimeout(() => sheet.close(), 1800);
 }
 
 function forecastNotes(pred) {
@@ -949,13 +1147,14 @@ function renderForecastPage() {
   }
   const notes = forecastNotes(pred).map((p) => `<p>${esc(p)}</p>`).join("");
   const basisText = {
-    past: `Sources are weighted by how close their forecasts came to what <b>${esc(state.stations?.history?.name || "the nearest airport")}</b> actually measured over the last day.`,
+    past: `Sources are weighted by how close their forecasts came to what <b>${esc(state.stations?.history?.name || "the nearest airport")}</b> actually measured over the last day${pred.reports ? ", and to what you reported" : ""}.`,
     now: `Sources are weighted by how close they are to what <b>${pred.now.obs.tempN} nearby station${pred.now.obs.tempN === 1 ? "" : "s"}</b> read right now. As this phone saves more forecasts, the weights will switch to each source's track record over the past day.`,
     equal: "No station readings are available here yet, so every source counts equally.",
   }[pred.basis];
   const wrows = pred.weights.map((w) => {
     const lean = w.bias && Math.abs(fmt.tempDiff(w.bias)) >= 1 ? `, runs ${Math.abs(fmt.tempDiff(w.bias))}° ${w.bias > 0 ? "warm" : "cold"} here (corrected)` : "";
-    const detail = w.basis === "past" && w.err != null ? `${fmt.tempDiff(w.err) || "<1"}° off on average${lean}` : w.basis === "now" && w.err != null ? `${Math.round(fmt.tempDiff(w.err) * 10) / 10}° from stations now` : "";
+    let detail = w.basis === "past" && w.err != null ? `${fmt.tempDiff(w.err) || "<1"}° off on average${lean}` : w.basis === "now" && w.err != null ? `${Math.round(fmt.tempDiff(w.err) * 10) / 10}° from stations now` : "";
+    if (w.rated && w.rated.match != null) detail += `${detail ? " · " : ""}matched your reports ${Math.round(w.rated.match * 100)}%`;
     return `<div class="wrow"><div class="nm"><b>${esc(w.name)}</b><small>${detail}</small></div><div class="track"><i style="width:${(w.w / pred.weights[0].w) * 100}%"></i></div><div class="pc">${Math.round(w.w * 100)}%</div></div>`;
   }).join("");
   const adj = fmt.tempDiff(pred.now.tempAdj);
@@ -978,12 +1177,13 @@ function renderForecastPage() {
   }).join("");
 
   box.innerHTML = `
-    <section class="panel"><h2>Next 24 hours</h2>${hourChart(pred.hours.slice(0, 24))}
+    <section class="panel"><div class="ph"><h2>Next 24 hours</h2>${rateChip()}</div>${hourChart(pred.hours.slice(0, 24))}
       <div class="legend"><span><i style="background:var(--warm);opacity:.5"></i>Temperature</span><span><i style="background:var(--rain)"></i>Chance of rain</span><span><i style="background:var(--wind)"></i>Wind, ${fmt.windUnit()}</span></div></section>
     <section class="panel"><h2>Next 7 days</h2><div class="conf-key"><span><i class="conf high"></i>High</span><span><i class="conf medium"></i>Medium</span><span><i class="conf low"></i>Low confidence</span></div>${drows}</section>
     <section class="panel notes"><h2>Forecaster's notes</h2>${notes}
       <div class="byline">Worked out on this phone from ${pred.weights.length} forecasts and ${(state.stations?.stations || []).length} live stations.</div></section>
-    <section class="panel"><h2>How this forecast is made</h2><p class="how">Tailored to <b>${esc(state.place.gps ? "where you are" : state.place.name)}</b>${placeElev() != null ? ` (${Math.round(placeElev())} m above sea level)` : ""}, using stations within ${fmt.dist(40)}. Closer stations count more, and readings from higher or lower stations are corrected for height.</p><p class="how">${basisText}</p>${nowText}${wrows}</section>`;
+    <section class="panel"><h2>How this forecast is made</h2><p class="how">Tailored to <b>${esc(state.place.gps ? "where you are" : state.place.name)}</b>${placeElev() != null ? ` (${Math.round(placeElev())} m above sea level)` : ""}, using stations within ${fmt.dist(40)}. Closer stations count more, and readings from higher or lower stations are corrected for height.</p><p class="how">${basisText}</p>${nowText}${pred.reports ? `<p class="how">You've rated the weather here <b>${pred.reports} time${pred.reports === 1 ? "" : "s"}</b>. Sources whose forecasts matched what you saw count for more.</p>` : ""}${wrows}</section>`;
+  box.querySelector("[data-rate]").onclick = () => openRate(pred);
   box.querySelectorAll(".drow").forEach((b) => {
     b.onclick = () => { const i = Number(b.dataset.day); state.fday = state.fday === i ? null : i; render(); };
   });
@@ -1505,6 +1705,18 @@ function init() {
   window.addEventListener("hashchange", () => switchPage(pageFromHash()));
   window.addEventListener("resize", placeTabBlob);
   initChartScrub();
+  // The Stations sheet and globe are laid out around the sky bar, so track its height.
+  const skyH = () => {
+    document.documentElement.style.setProperty("--sky-h", $("#sky").offsetHeight + "px");
+    if (state.page === "stations" && window.StationMap) StationMap.refit();
+  };
+  if (window.ResizeObserver) new ResizeObserver(skyH).observe($("#sky"));
+  initSheetDrag();
+  window.addEventListener("resize", () => {
+    setSheetTop(sheetTarget());
+    skyH();
+  });
+  skyH();
   if (document.fonts) document.fonts.ready.then(placeTabBlob);
   state.page = pageFromHash();
   document.querySelectorAll("#modes button").forEach((b) => (b.onclick = () => {

@@ -123,7 +123,60 @@
     return out;
   }
 
-  function weightsFor(sources, obs, nowMs, skill) {
+  // What people have said the weather was really like here, compared with what each source
+  // forecast for that hour. reports: [{ code, temp?, wind?, src: { id: { temp, code, pop, wind } } }]
+  // wind is "calm", "breezy" or "windy". Returns per source: temperature misses and how often its
+  // sky, rain and wind matched what was reported (0 to 1).
+  const SKY = { clear: 0, partly: 1, cloudy: 2, fog: 2 };
+  const windClass = (kmh) => (kmh == null ? null : kmh < 12 ? "calm" : kmh < 30 ? "breezy" : "windy");
+  function scoreReports(reports) {
+    const out = {};
+    for (const r of reports || []) {
+      if (!r || !r.src) continue;
+      const saidWet = WET.has(r.code);
+      for (const [id, f] of Object.entries(r.src)) {
+        const o = (out[id] ||= { n: 0, hits: 0, errs: [] });
+        let score = 0, parts = 0;
+        if (r.code) {
+          const fWet = (f.pop != null && f.pop >= 50) || WET.has(f.code);
+          if (fWet === saidWet) {
+            score += 0.6;
+            // Both dry: did it get the sky right too? Both wet: did it get the kind of wet right?
+            if (!saidWet && f.code in SKY && r.code in SKY) score += Math.abs(SKY[f.code] - SKY[r.code]) === 0 ? 0.4 : Math.abs(SKY[f.code] - SKY[r.code]) === 1 ? 0.2 : 0;
+            else if (saidWet) score += f.code === r.code ? 0.4 : 0.2;
+          }
+          parts += 1;
+        }
+        if (r.wind && f.wind != null) { score += windClass(f.wind) === r.wind ? 0.5 : 0; parts += 0.5; }
+        if (parts) { o.n++; o.hits += score / parts; }
+        if (r.temp != null && f.temp != null) o.errs.push(f.temp - r.temp);
+      }
+    }
+    for (const o of Object.values(out)) {
+      o.match = o.n ? o.hits / o.n : null;
+      o.tempN = o.errs.length;
+      o.mae = o.tempN ? o.errs.reduce((a, b) => a + Math.abs(b), 0) / o.tempN : null;
+      o.bias = o.tempN ? o.errs.reduce((a, b) => a + b, 0) / o.tempN : null;
+      delete o.errs;
+    }
+    return out;
+  }
+
+  // Add reported temperatures to the airport track record. One report counts as three airport
+  // checks, because it is from the exact spot and a person took the trouble.
+  function mergeSkill(skill, rated) {
+    const out = { ...(skill || {}) };
+    for (const [id, r] of Object.entries(rated || {})) {
+      if (!r.tempN) continue;
+      const a = out[id], k = r.tempN * 3;
+      out[id] = a && a.n
+        ? { n: a.n + k, mae: (a.mae * a.n + r.mae * k) / (a.n + k), bias: (a.bias * a.n + r.bias * k) / (a.n + k) }
+        : { n: k, mae: r.mae, bias: r.bias };
+    }
+    return out;
+  }
+
+  function weightsFor(sources, obs, nowMs, skill, rated) {
     const scored = sources.filter((s) => skill && skill[s.id] && skill[s.id].n >= 6);
     const out = {};
     if (scored.length >= Math.max(2, sources.length / 2)) {
@@ -150,6 +203,14 @@
     } else {
       for (const s of sources) out[s.id] = { raw: 1, basis: "equal", err: null };
     }
+    // Sources that matched what people reported here get more say; ones that kept missing get less.
+    for (const s of sources) {
+      const r = rated && rated[s.id];
+      if (!r || !r.n || !out[s.id]) continue;
+      const smoothed = (r.hits + 0.6) / (r.n + 1); // a single report can't swing things much
+      out[s.id].raw *= (0.35 + smoothed) ** 2;
+      out[s.id].rated = { n: r.n, match: r.match };
+    }
     const total = Object.values(out).reduce((a, x) => a + x.raw, 0) || 1;
     for (const v of Object.values(out)) v.w = Math.max(v.raw / total, 0.02);
     const total2 = Object.values(out).reduce((a, x) => a + x.w, 0);
@@ -157,13 +218,15 @@
     return out;
   }
 
-  function predict({ providers, stations, nowKey, skill, placeElev = null, hours: nHours = 36 }) {
+  function predict({ providers, stations, nowKey, skill, reports, placeElev = null, hours: nHours = 36 }) {
     const sources = (providers || []).filter((p) => p && p.ok && p.hours && p.hours.length);
     const dailySources = (providers || []).filter((p) => p && p.ok && p.days && p.days.length);
     const nowMs = ms(nowKey.slice(0, 13) + ":00");
     const realNow = Date.now();
     const obs = observedNow(stations, realNow, placeElev);
-    const weights = weightsFor(sources, obs, nowMs, skill);
+    const rated = reports && reports.length ? scoreReports(reports) : null;
+    if (rated) skill = mergeSkill(skill, rated);
+    const weights = weightsFor(sources, obs, nowMs, skill, rated);
     const wOf = (id) => (weights[id] ? weights[id].w : 1 / Math.max(sources.length, 1));
     const biasOf = (id) => (weights[id] && weights[id].bias) || 0;
 
@@ -257,7 +320,7 @@
     const ws = sources
       .map((s) => ({ id: s.id, name: s.name, ...weights[s.id] }))
       .sort((a, b) => b.w - a.w);
-    return { hours, days, weights: ws, now, basis: ws[0] ? ws[0].basis : "equal" };
+    return { hours, days, weights: ws, now, basis: ws[0] ? ws[0].basis : "equal", reports: (reports || []).length };
   }
 
   // Keep a copy of each source's next 24 hours, at most one per hour, for later scoring.
@@ -277,5 +340,19 @@
     return { issued: keyOf(nowMs).slice(0, 13) + ":00", f };
   }
 
-  root.Blend = { predict, scoreSkill, snapshot, observedNow, toLocalKey, at, median };
+  // What each source forecast for the hour someone reports on, saved alongside the report.
+  function reportFrom(providers, nowKey, said) {
+    const t = ms(nowKey.slice(0, 16));
+    const src = {};
+    for (const p of providers || []) {
+      if (!p || !p.ok || !p.hours) continue;
+      const f = { temp: at(p.hours, t, "temp"), code: at(p.hours, t, "code"), pop: at(p.hours, t, "pop"), wind: at(p.hours, t, "wind") };
+      if (f.temp == null && f.code == null) continue;
+      if (f.temp != null) f.temp = Math.round(f.temp * 10) / 10;
+      src[p.id] = f;
+    }
+    return { at: nowKey.slice(0, 16), code: said.code || null, temp: said.temp ?? null, wind: said.wind || null, src };
+  }
+
+  root.Blend = { predict, scoreSkill, scoreReports, mergeSkill, reportFrom, snapshot, observedNow, toLocalKey, at, median };
 })(typeof window !== "undefined" ? window : globalThis);
