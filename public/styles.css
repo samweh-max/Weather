@@ -453,7 +453,6 @@ main { padding: 4px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, en
 #globeBtn { width: 34px; justify-content: center; padding: 0; margin-left: auto; }
 #globeBtn + #recentre { margin-left: 0; }
 /* With the radar on, hide stations and rain gauges so the rain shows clearly. */
-.map .st-mk { transition: visibility .25s; }
 .map.radar-on .st-mk, .map.far .st-mk { visibility: hidden; pointer-events: none; }
 .map-key.dim { opacity: .4; }
 /* Satellite: markers need a little more contrast against the imagery. */
@@ -663,9 +662,12 @@ body.on-globe #main { padding-bottom: 0; }
 .globe-layer .maplibregl-ctrl-bottom-left { left: max(10px, env(safe-area-inset-left, 0px)); }
 
 /* The globe fades and grows in the first time, and turns slowly until touched. */
-.map .maplibregl-canvas-container, .map .maplibregl-marker { transition: opacity .9s ease-out, transform 1.1s cubic-bezier(.2, .8, .2, 1); }
+/* Only the globe picture animates. Markers must not: the map moves them every frame, and any
+   transition on them makes them trail behind and float about instead of staying pinned. */
+.map .maplibregl-canvas-container { transition: opacity .9s ease-out, transform 1.1s cubic-bezier(.2, .8, .2, 1); }
+.map .maplibregl-marker { transition: none !important; }
 .map.intro .maplibregl-canvas-container { opacity: 0; transform: scale(.82); }
-.map.intro .maplibregl-marker { opacity: 0 !important; }
+.map.intro .maplibregl-marker { visibility: hidden; }
 #recentre span { display: none; }
 .map.globe ~ .map-bar #recentre { width: auto; padding: 0 12px; gap: 6px; margin-left: auto; }
 .map.globe ~ .map-bar #recentre span { display: inline; }
