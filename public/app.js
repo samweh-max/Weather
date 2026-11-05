@@ -419,7 +419,7 @@ function sunBar(date) {
   const r = placeClock(t.rise), st = placeClock(t.set);
   const len = st.mins - r.mins;
   const midnight = t.rise.getTime() - r.mins * 60e3;
-  const W = 340, H = 58, base = 38, up = 32, down = 16;
+  const W = 340, H = 36, base = 24, up = 20, down = 8;
   const pts = [];
   for (let m = 0; m <= 1440; m += 10) pts.push([m, sunElevation(midnight + m * 60e3, lat, lon)]);
   const hi = Math.max(...pts.map((p) => p[1]), 1), lo = Math.min(...pts.map((p) => p[1]), -1);
@@ -430,29 +430,29 @@ function sunBar(date) {
   let g = `<defs>
       <clipPath id="${id}a"><rect x="0" y="0" width="${W}" height="${base}"/></clipPath>
       <clipPath id="${id}b"><rect x="0" y="${base}" width="${W}" height="${H - base}"/></clipPath>
-      <linearGradient id="${id}f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".34"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+      <linearGradient id="${id}f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
       <radialGradient id="${id}g"><stop offset="0" stop-color="#fff7e8" stop-opacity=".95"/><stop offset=".45" stop-color="#ffe6c2" stop-opacity=".35"/><stop offset="1" stop-color="#ffe6c2" stop-opacity="0"/></radialGradient>
     </defs>`;
   g += `<path d="${line}L${W} ${base}L0 ${base}Z" fill="url(#${id}f)" clip-path="url(#${id}a)"/>`;
   g += `<path class="night" d="${line}" clip-path="url(#${id}b)"/>`;
   g += `<path class="day" d="${line}" clip-path="url(#${id}a)"/>`;
   g += `<line class="hz" x1="0" x2="${W}" y1="${base}" y2="${base}"/>`;
-  g += `<circle class="edge" cx="${X(r.mins).toFixed(1)}" cy="${base}" r="2.6"/><circle class="edge" cx="${X(st.mins).toFixed(1)}" cy="${base}" r="2.6"/>`;
+  g += `<circle class="edge" cx="${X(r.mins).toFixed(1)}" cy="${base}" r="1.8"/><circle class="edge" cx="${X(st.mins).toFixed(1)}" cy="${base}" r="1.8"/>`;
   if (date === placeToday()) {
     const now = placeClock(new Date()).mins;
     const el = sunElevation(midnight + now * 60e3, lat, lon);
     const x = X(now).toFixed(1), y = Y(el).toFixed(1);
     g += el > 0
-      ? `<circle cx="${x}" cy="${y}" r="16" fill="url(#${id}g)"/><circle class="sun-dot" cx="${x}" cy="${y}" r="5.5"/>`
-      : `<circle class="moon-dot" cx="${x}" cy="${y}" r="4"/>`;
+      ? `<circle cx="${x}" cy="${y}" r="9" fill="url(#${id}g)"/><circle class="sun-dot" cx="${x}" cy="${y}" r="3.5"/>`
+      : `<circle class="moon-dot" cx="${x}" cy="${y}" r="2.5"/>`;
   }
   const dl = `${Math.floor(len / 60)} h ${String(len % 60).padStart(2, "0")} min`;
   return `<div class="sun" aria-label="Sunrise ${r.text}, sunset ${st.text}, ${dl} of daylight">
       <svg class="sun-wave" viewBox="0 0 ${W} ${H}" aria-hidden="true">${g}</svg>
       <div class="sun-lbl">
-        <span class="se"><small>Sunrise</small><b>${r.text}</b></span>
+        <span>Sunrise <b>${r.text}</b></span>
         <span class="len">${dl} of daylight</span>
-        <span class="se r"><small>Sunset</small><b>${st.text}</b></span>
+        <span>Sunset <b>${st.text}</b></span>
       </div>
     </div>`;
 }
