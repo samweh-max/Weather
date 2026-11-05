@@ -48,7 +48,7 @@ const state = {
   fetchedAt: null,
   day: 0,
   open: null,             // expanded provider id
-  mode: store.get("wc.mode", "temp"), // what the list compares: temp, rain or wind
+  mode: store.get("wc.mode", "temp"), // what the list compares: all, temp, rain or wind
   page: "compare",        // compare, forecast or stations
   stations: null,         // live station readings near the place
   stationsLoading: false,
@@ -556,7 +556,7 @@ function renderRow(p, date, scale) {
 
   if (d) {
     let badge = "";
-    if (state.mode === "temp" && scale.hi != null) {
+    if ((state.mode === "temp" || state.mode === "all") && scale.hi != null) {
       const diff = fmt.tempDiff(d.hi - scale.hi);
       if (Math.abs(diff) >= 2) badge = `<span class="diff ${diff > 0 ? "up" : "down"}">${diff > 0 ? "+" : "−"}${Math.abs(diff)}°</span>`;
     }
@@ -577,6 +577,13 @@ function renderRow(p, date, scale) {
 }
 
 function vizFor(d, s) {
+  if (state.mode === "all") {
+    // Everything at a glance: high / low, chance of rain, and wind.
+    const pop = d.pop != null ? Math.round(d.pop) + "%" : "–";
+    return `<div class="viz all"><span class="t"><b>${fmt.temp(d.hi)}</b><small>${fmt.temp(d.lo)}</small></span>
+      <span class="r">${pop}${d.mm ? `<small>${fmt.rain(d.mm)}</small>` : ""}</span>
+      <span class="w">${windArrow(d.dir, "")}${d.wind != null ? fmt.windNum(d.wind) : "–"}${d.gust != null ? `<small>gust ${fmt.windNum(d.gust)}</small>` : ""}</span></div>`;
+  }
   if (state.mode === "rain") {
     const pop = d.pop != null ? Math.round(d.pop) : null;
     const mm = fmt.rain(d.mm);

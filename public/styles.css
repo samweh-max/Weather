@@ -224,7 +224,7 @@ main { padding: 4px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, en
 .compare-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 0 4px; }
 .compare-head h2 { margin: 0; font: 600 19px/1.2 var(--font-display); letter-spacing: -0.01em; }
 .modes { display: flex; background: var(--track); border-radius: 999px; padding: 3px; }
-.modes button { padding: 6px 13px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--muted); min-height: 34px; }
+.modes button { padding: 6px 11px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--muted); min-height: 34px; }
 .modes button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(14, 26, 36, 0.12); }
 
 .group { margin: 16px 2px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
@@ -257,6 +257,14 @@ main { padding: 4px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, en
 .viz.wind .b { text-align: right; line-height: 1.1; }
 .viz.wind .b small { display: block; font-size: 10px; font-weight: 500; color: var(--muted); }
 .viz.wind .mm { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+.viz.all { grid-template-columns: 1fr 1fr 1.15fr; gap: 6px; align-items: start; }
+.viz.all > span { display: grid; justify-items: end; line-height: 1.15; font-weight: 600; }
+.viz.all small { font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+.viz.all .t small { color: var(--muted); }
+.viz.all .r { color: var(--rain); }
+.viz.all .w { color: var(--wind); grid-template-columns: auto auto; column-gap: 3px; align-items: center; }
+.viz.all .w svg { width: 12px; height: 12px; }
+.viz.all .w small { grid-column: 1 / -1; }
 .row .msg { grid-column: 2 / -1; font-size: 13px; color: var(--muted); text-align: right; }
 .row.off .n { color: var(--muted); }
 .diff { display: inline-block; font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
