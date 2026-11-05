@@ -698,3 +698,11 @@ body.on-globe #footer { display: none; }
 @keyframes sheet-up { from { transform: translateY(45vh); } }
 @keyframes sheet-down { to { transform: translateY(50vh); opacity: .4; } }
 @keyframes rise-in { from { opacity: 0; transform: translateY(6vh) scale(.98); } }
+
+/* Dragging the Stations sheet. The handle takes the drag; the rest of the sheet scrolls as usual. */
+.st-handle { touch-action: none; cursor: grab; margin: -8px calc(-1 * max(16px, env(safe-area-inset-left, 0px))) 0; padding: 8px max(16px, env(safe-area-inset-left, 0px)) 6px; border-radius: 26px 26px 0 0; }
+.st-handle:active { cursor: grabbing; }
+.st-handle .grab { transition: width .2s, background .2s; }
+.st-handle:hover .grab, .st-handle:active .grab { width: 46px; background: color-mix(in srgb, var(--ink) 30%, transparent); }
+#pageStations.settling { transition: padding-top .45s cubic-bezier(.2, .9, .25, 1); }
+.globe-layer .maplibregl-ctrl-bottom-left, .globe-layer .maplibregl-ctrl-bottom-right { transition: bottom .45s cubic-bezier(.2, .9, .25, 1); }

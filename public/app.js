@@ -321,7 +321,7 @@ function render() {
   // On Stations the globe fills the page behind everything and the cards sit on a sheet above it.
   $("#globeLayer").hidden = page !== "stations";
   document.body.classList.toggle("on-globe", page === "stations");
-  if (page === "stations") document.documentElement.style.setProperty("--sheet-top", Math.round(window.innerHeight * 0.6) + "px");
+  if (page === "stations") setSheetTop(sheetTarget());
   if (page === "forecast") {
     const pred = renderForecastPage();
     if (pred && pred.days.length) applyHero(heroForecast(pred));
@@ -844,6 +844,62 @@ function switchPage(p, before) {
     void m.offsetWidth;
     m.classList.add("page-in");
   }
+}
+
+// ---------- Stations sheet ----------
+// The cards on the Stations page sit on a sheet over the globe. Drag its handle down to see
+// more of the map (it settles low, showing just its top), drag it up or tap to bring it back.
+
+let sheetLow = false;
+const sheetTarget = () => Math.round(sheetLow ? window.innerHeight - 150 : window.innerHeight * 0.6);
+function setSheetTop(px) {
+  document.documentElement.style.setProperty("--sheet-top", px + "px");
+}
+function settleSheet(low) {
+  sheetLow = low;
+  const page = $("#pageStations");
+  page.classList.add("settling");
+  setSheetTop(sheetTarget());
+  $(".st-handle").setAttribute("aria-label", low ? "Drag up to show the stations" : "Drag down to see more of the map");
+  if (window.StationMap) StationMap.refit(true);
+  clearTimeout(settleSheet.t);
+  settleSheet.t = setTimeout(() => page.classList.remove("settling"), 500);
+}
+function initSheetDrag() {
+  const h = $(".st-handle");
+  if (!h) return;
+  let y0 = null, top0 = 0, moved = false, lastY = 0, lastT = 0, v = 0;
+  h.addEventListener("pointerdown", (e) => {
+    if (window.scrollY > 4) return;
+    y0 = e.clientY; top0 = sheetTarget(); moved = false; lastY = e.clientY; lastT = e.timeStamp; v = 0;
+    h.setPointerCapture(e.pointerId);
+    $("#pageStations").classList.remove("settling");
+  });
+  h.addEventListener("pointermove", (e) => {
+    if (y0 == null) return;
+    const dy = e.clientY - y0;
+    if (Math.abs(dy) > 4) moved = true;
+    v = (e.clientY - lastY) / Math.max(1, e.timeStamp - lastT);
+    lastY = e.clientY; lastT = e.timeStamp;
+    // Follow the finger, with some resistance past the ends.
+    const lo = window.innerHeight * 0.6, hi = window.innerHeight - 150;
+    let t = top0 + dy;
+    if (t < lo) t = lo - (lo - t) * 0.3;
+    if (t > hi) t = hi + (t - hi) * 0.3;
+    setSheetTop(Math.round(t));
+  });
+  const end = (e) => {
+    if (y0 == null) return;
+    const dy = e.clientY - y0;
+    y0 = null;
+    if (!moved) return settleSheet(!sheetLow); // a tap flips it
+    // A flick decides; otherwise go to whichever end is nearer.
+    const low = Math.abs(v) > 0.4 ? v > 0 : top0 + dy > (window.innerHeight * 0.6 + window.innerHeight - 150) / 2;
+    settleSheet(low);
+  };
+  h.addEventListener("pointerup", end);
+  h.addEventListener("pointercancel", end);
+  h.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); settleSheet(!sheetLow); } });
 }
 
 // ---------- Stations data and the Forecaster ----------
@@ -1655,8 +1711,9 @@ function init() {
     if (state.page === "stations" && window.StationMap) StationMap.refit();
   };
   if (window.ResizeObserver) new ResizeObserver(skyH).observe($("#sky"));
+  initSheetDrag();
   window.addEventListener("resize", () => {
-    document.documentElement.style.setProperty("--sheet-top", Math.round(window.innerHeight * 0.6) + "px");
+    setSheetTop(sheetTarget());
     skyH();
   });
   skyH();

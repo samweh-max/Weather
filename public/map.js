@@ -18,6 +18,7 @@
   let opts = {};
   let cartoKey = null;
   let style = "map";
+  let ready = false; // the map has finished its first load
 
   function loadLib() {
     if (window.maplibregl) return Promise.resolve();
@@ -391,7 +392,9 @@
       });
       map.touchPitch.disable();
       // Open on the whole Earth, floating on the page, turning slowly; it fades and grows in.
+      ready = false;
       map.once("load", () => {
+        ready = true;
         map.resize();
         fitPadding();
         map.jumpTo({ zoom: globeZoom() });
@@ -440,7 +443,7 @@
     placeMarker.getElement().style.zIndex = "5";
     placeMarker.getElement().onclick = () => { if (atGlobe()) toPlace(); };
     placeMarker.getElement().setAttribute("aria-label", "Zoom in to stations near you");
-    if (map.loaded()) addStations(stations); else map.once("load", () => addStations(stations));
+    if (ready) addStations(stations); else map.once("load", () => addStations(stations));
     // Resizing clears the canvas for a frame, so only do it when the size really changed.
     setTimeout(() => {
       const c = map.getCanvas(), box = map.getContainer();
@@ -456,8 +459,18 @@
   }
 
   // The sky bar or the screen changed size: keep the globe in the open space, and the right size.
-  function refit() {
-    if (!map || !map.loaded()) return;
+  function refit(smooth) {
+    if (!map || !ready) return;
+    if (smooth) {
+      // Glide to the new open space; at the globe, grow or shrink it to fit.
+      const sp = space();
+      const padding = { top: sp.top, bottom: sp.bottom, left: 0, right: 0 };
+      const want = Math.min(sp.w, sp.h) / 2 - 8;
+      const opts = { padding, duration: 450, easing: (t) => 1 - Math.pow(1 - t, 3) };
+      if (atGlobe()) opts.zoom = map.getZoom() + Math.log2(want / globeRadius());
+      map.easeTo(opts);
+      return;
+    }
     if (fitPadding() && atGlobe() && !map.isMoving()) map.jumpTo({ zoom: globeZoom() });
   }
 
