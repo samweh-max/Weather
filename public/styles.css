@@ -176,19 +176,20 @@ svg { display: block; }
 .mini .mw svg { width: 13px; height: 13px; }
 
 /* Sunrise to sunset across the day, midnight to midnight. */
-.sun { margin-top: 14px; }
-.sun-arc { display: block; width: 100%; height: auto; overflow: visible; }
-.sun-arc .hz { stroke: rgba(255, 255, 255, 0.28); stroke-width: 1; stroke-dasharray: 2 4; }
-.sun-arc .arc { fill: none; stroke: rgba(255, 255, 255, 0.35); stroke-width: 1.5; stroke-dasharray: 3 4; }
-.sun-arc .done { fill: none; stroke: rgba(255, 255, 255, 0.9); stroke-width: 2; stroke-linecap: round; }
-.sun-arc .done-fill { fill: rgba(255, 255, 255, 0.1); }
-.sun-arc .edge { fill: rgba(255, 255, 255, 0.7); }
-.sun-arc .sun-dot { fill: #fffaf0; stroke: rgba(255, 226, 185, 0.9); stroke-width: 1.5; }
-.sun-arc .moon-dot { fill: rgba(225, 233, 250, 0.9); stroke: rgba(255, 255, 255, 0.3); stroke-width: 3; }
-.sun-lbl { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
-.sun-lbl > span { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
-.sun-lbl .len { font-weight: 400; opacity: 0.8; text-align: center; }
-.sun-lbl svg { width: 16px; height: 16px; flex: none; }
+.sun { margin-top: 12px; }
+.sun-wave { display: block; width: 100%; height: auto; overflow: visible; }
+.sun-wave .day { fill: none; stroke: rgba(255, 255, 255, 0.92); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sun-wave .night { fill: none; stroke: rgba(255, 255, 255, 0.28); stroke-width: 1.5; stroke-dasharray: 1 4; stroke-linecap: round; }
+.sun-wave .hz { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1; }
+.sun-wave .edge { fill: #fff; }
+.sun-wave .sun-dot { fill: #fffaf2; filter: drop-shadow(0 0 4px rgba(255, 236, 205, 0.9)); }
+.sun-wave .moon-dot { fill: rgba(235, 240, 255, 0.75); stroke: rgba(255, 255, 255, 0.25); stroke-width: 3; }
+.sun-lbl { display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; margin-top: 2px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.sun-lbl .se { display: grid; line-height: 1.15; }
+.sun-lbl .se.r { text-align: right; }
+.sun-lbl .se small { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; opacity: .7; }
+.sun-lbl .se b { font: 600 15px/1.2 var(--font-display); }
+.sun-lbl .len { opacity: 0.8; padding-bottom: 2px; }
 .sun-lbl.one { justify-content: center; opacity: 0.88; }
 .conf-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: -4px 0 10px; font-size: 12px; color: var(--muted); }
 .conf-key .conf { margin: 0 5px 0 0; vertical-align: 1px; }
@@ -281,9 +282,27 @@ main { padding: 4px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, en
   bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   max-width: 420px; margin: 0 auto;
   display: flex; padding: 6px; border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 78%, transparent);
-  backdrop-filter: blur(18px) saturate(1.5); -webkit-backdrop-filter: blur(18px) saturate(1.5);
-  box-shadow: 0 10px 30px -8px rgba(10, 20, 30, 0.28), 0 2px 6px rgba(10, 20, 30, 0.08), inset 0 0 0 1px var(--line);
+  /* Glass: mostly see-through, heavily blurred, with a bright rim along the top and a faint sheen. */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.08) 48%, rgba(255, 255, 255, 0.16) 100%),
+    color-mix(in srgb, var(--surface) 30%, transparent);
+  backdrop-filter: blur(24px) saturate(1.8) brightness(1.05); -webkit-backdrop-filter: blur(24px) saturate(1.8) brightness(1.05);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow:
+    0 14px 34px -10px rgba(10, 20, 30, 0.35), 0 2px 8px rgba(10, 20, 30, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75), inset 0 -1px 0 rgba(255, 255, 255, 0.18);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .tabs {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.03) 50%, rgba(255, 255, 255, 0.06) 100%), color-mix(in srgb, var(--surface) 38%, transparent);
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow: 0 14px 34px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  }
+}
+:root[data-theme="dark"] .tabs {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.03) 50%, rgba(255, 255, 255, 0.06) 100%), color-mix(in srgb, var(--surface) 38%, transparent);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 14px 34px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
 }
 .tabs button {
   position: relative; z-index: 1;
@@ -297,11 +316,18 @@ main { padding: 4px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, en
 .tab-blob {
   position: absolute; top: 6px; bottom: 6px; left: 0; width: var(--w, 0px);
   transform: translateX(var(--x, 0px)); border-radius: 999px;
-  background: color-mix(in srgb, var(--rain) 15%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rain) 22%, transparent);
+  /* A glass bubble: lit from above, with a soft tint of the accent colour. */
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 60%),
+    color-mix(in srgb, var(--rain) 16%, rgba(255, 255, 255, 0.25));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 4px 12px -4px color-mix(in srgb, var(--rain) 45%, transparent);
   transition: transform 0.5s cubic-bezier(0.34, 1.45, 0.64, 1), width 0.3s ease;
   view-transition-name: tab-blob;
 }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .tab-blob { background: radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 60%), color-mix(in srgb, var(--rain) 24%, rgba(255, 255, 255, 0.06)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+}
+:root[data-theme="dark"] .tab-blob { background: radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 60%), color-mix(in srgb, var(--rain) 24%, rgba(255, 255, 255, 0.06)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
 .tab-blob.hop { animation: hop 0.5s cubic-bezier(0.3, 0.7, 0.4, 1); }
 .tabs.still .tab-blob { transition: none; animation: none; }
 @keyframes hop {
@@ -526,8 +552,11 @@ h2 + button.srow { border-top: 0; }
 /* The sky keeps its natural size and is clipped as it grows or shrinks, so its text never stretches. */
 ::view-transition-group(sky) { overflow: hidden; border-radius: 0 0 22px 22px; }
 ::view-transition-old(sky), ::view-transition-new(sky) { height: auto; width: 100%; object-fit: none; object-position: top; }
-::view-transition-old(sky) { animation: fade-out 0.18s ease-in both; }
-::view-transition-new(sky) { animation: fade-in 0.3s 0.06s ease-out both; }
+/* A true cross-fade: both images add up to full strength all the way through, so nothing dips or flashes. */
+::view-transition-old(sky), ::view-transition-new(sky) { mix-blend-mode: plus-lighter; }
+::view-transition-image-pair(sky) { isolation: isolate; }
+::view-transition-old(sky) { animation: fade-out 0.3s ease-in-out both; }
+::view-transition-new(sky) { animation: fade-in 0.3s ease-in-out both; }
 @keyframes fade-out { to { opacity: 0; } }
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes page-out { to { opacity: 0; transform: translateX(calc(var(--dx) * -1)) scale(0.985); } }
@@ -652,6 +681,11 @@ body.on-globe #footer { display: none; }
 
 /* Going to Stations: the page drops away and the cards rise as a sheet over the globe, which grows in.
    Leaving: the sheet slides down and the globe recedes. */
+/* The globe sits above the old page's backdrop but below the sky bar, the cards and the tab bar. */
+::view-transition-group(globe) { z-index: 0; }
+::view-transition-group(sky), ::view-transition-group(page), ::view-transition-group(tabs), ::view-transition-group(tab-blob) { z-index: 1; }
+::view-transition-group(tabs) { z-index: 2; }
+::view-transition-group(tab-blob) { z-index: 3; }
 ::view-transition-new(globe) { animation: globe-in .7s cubic-bezier(.2, .8, .2, 1) both; }
 ::view-transition-old(globe) { animation: globe-out .35s cubic-bezier(.4, 0, 1, 1) both; }
 @keyframes globe-in { from { opacity: 0; transform: scale(1.18); } }

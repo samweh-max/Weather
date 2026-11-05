@@ -145,8 +145,10 @@
     return { top, bottom: Math.max(0, box.clientHeight - bottom), w: box.clientWidth, h: Math.max(120, bottom - top) };
   }
   function fitPadding() {
-    const sp = space();
+    const sp = space(), now = map.getPadding();
+    if (Math.abs(now.top - sp.top) < 1 && Math.abs(now.bottom - sp.bottom) < 1) return false;
     map.setPadding({ top: sp.top, bottom: sp.bottom, left: 0, right: 0 });
+    return true;
   }
   function globeZoom() {
     const sp = space();
@@ -439,7 +441,12 @@
     placeMarker.getElement().onclick = () => { if (atGlobe()) toPlace(); };
     placeMarker.getElement().setAttribute("aria-label", "Zoom in to stations near you");
     if (map.loaded()) addStations(stations); else map.once("load", () => addStations(stations));
-    setTimeout(() => { map.resize(); fitPadding(); }, 50);
+    // Resizing clears the canvas for a frame, so only do it when the size really changed.
+    setTimeout(() => {
+      const c = map.getCanvas(), box = map.getContainer();
+      if (Math.abs(c.clientWidth - box.clientWidth) > 1 || Math.abs(c.clientHeight - box.clientHeight) > 1) map.resize();
+      fitPadding();
+    }, 50);
   }
 
   function reset() {
@@ -451,8 +458,7 @@
   // The sky bar or the screen changed size: keep the globe in the open space, and the right size.
   function refit() {
     if (!map || !map.loaded()) return;
-    fitPadding();
-    if (atGlobe() && !map.isMoving()) map.jumpTo({ zoom: globeZoom() });
+    if (fitPadding() && atGlobe() && !map.isMoving()) map.jumpTo({ zoom: globeZoom() });
   }
 
   window.StationMap = { show, reset, refit, tempColor };
