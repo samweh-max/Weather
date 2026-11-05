@@ -306,7 +306,7 @@
         dir: wdir(ds.map((x) => [x.d.dir, x.w])),
         code: code || "cloudy",
         hiMin: Math.min(...his), hiMax: Math.max(...his),
-        n: ds.length, confidence, idx,
+        n: ds.length, confidence, split: rainSplit, idx,
       };
     });
 
