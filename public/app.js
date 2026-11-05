@@ -851,7 +851,102 @@ function prediction() {
     const hist = st.history.obs.map((o) => ({ key: Blend.toLocalKey(o.time, state.place.tz || "UTC"), temp: o.temp }));
     skill = Blend.scoreSkill(store.get(snapKey(), []), hist);
   }
-  return Blend.predict({ providers, stations: st.stations || [], nowKey: nowKey(), skill, placeElev: placeElev(), hours: 168 });
+  return Blend.predict({ providers, stations: st.stations || [], nowKey: nowKey(), skill, reports: store.get(rateKey(), []), placeElev: placeElev(), hours: 168 });
+}
+
+// ---------- Rate the forecast ----------
+// People say what the weather is really like; each report is kept with what every source
+// forecast for that hour, and the Forecaster leans towards the sources that match.
+
+const RATE_SKY = ["clear", "partly", "cloudy", "fog", "drizzle", "rain", "heavy-rain", "snow", "thunder"];
+const RATE_AGAIN = 3 * 3600e3; // the button goes quiet for three hours after a report
+function rateKey() {
+  return `wc.rate.${state.place.lat.toFixed(1)},${state.place.lon.toFixed(1)}`;
+}
+function lastRated() {
+  const list = state.place ? store.get(rateKey(), []) : [];
+  return list.length ? Date.parse(list[list.length - 1].saved) || 0 : 0;
+}
+function rateChip() {
+  const done = Date.now() - lastRated() < RATE_AGAIN;
+  return done
+    ? `<button class="rate-chip done" data-rate aria-label="You rated this forecast. Rate again">${CHECK}Rated</button>`
+    : `<button class="rate-chip" data-rate>${STAR}Rate now</button>`;
+}
+const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.6 2.5 5.2 5.7.8-4.1 4 1 5.7L12 16.6l-5.1 2.7 1-5.7-4.1-4 5.7-.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+const rate = { code: null, tempMode: null, temp: null, wind: null, base: null };
+
+function openRate(pred) {
+  const h = pred && pred.hours[0];
+  if (!h) return;
+  const night = Number(placeHour()) < 7 || Number(placeHour()) >= 18;
+  Object.assign(rate, { code: null, tempMode: null, temp: null, wind: null, base: h.temp });
+  const sheet = $("#rateSheet");
+  sheet.classList.remove("thanks");
+  $("#rateSub").textContent = `Forecaster has ${fmt.temp(h.temp)} and ${(WORDS[h.code] || "cloudy").toLowerCase()} for now.`;
+  $("#rateSky").innerHTML = RATE_SKY.map((c) =>
+    `<button data-code="${c}" aria-pressed="false">${wxIcon(c, night && (c === "clear" || c === "partly"), "ri")}<span>${c === "clear" && night ? "Clear" : WORDS[c]}</span></button>`).join("");
+  $("#rateSky").onclick = (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    rate.code = b.dataset.code;
+    $("#rateSky").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    $("#rateSend").disabled = false;
+  };
+  const shown = (c) => (state.settings.temp === "F" ? c * 9 / 5 + 32 : c);
+  const step = state.settings.temp === "F" ? 5 / 9 : 1;
+  const paintTemp = () => {
+    $("#rateTempRow").hidden = rate.tempMode == null;
+    $("#rateTempVal").textContent = rate.temp != null ? Math.round(shown(rate.temp)) + "°" : "";
+  };
+  document.querySelectorAll("#rateTempMode button").forEach((b) => {
+    b.setAttribute("aria-pressed", "false");
+    b.onclick = () => {
+      const m = b.dataset.v;
+      rate.tempMode = rate.tempMode === m ? null : m;
+      rate.temp = rate.tempMode == null ? null : rate.base + { colder: -2 * step, right: 0, warmer: 2 * step }[m];
+      document.querySelectorAll("#rateTempMode button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === rate.tempMode)));
+      paintTemp();
+    };
+  });
+  document.querySelectorAll("#rateTempRow button").forEach((b) => (b.onclick = () => {
+    rate.temp += Number(b.dataset.d) * step;
+    const d = rate.temp - rate.base;
+    rate.tempMode = Math.abs(d) < step / 2 ? "right" : d < 0 ? "colder" : "warmer";
+    document.querySelectorAll("#rateTempMode button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === rate.tempMode)));
+    paintTemp();
+  }));
+  document.querySelectorAll("#rateWind button").forEach((b) => {
+    b.setAttribute("aria-pressed", "false");
+    b.onclick = () => {
+      rate.wind = rate.wind === b.dataset.v ? null : b.dataset.v;
+      document.querySelectorAll("#rateWind button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === rate.wind)));
+    };
+  });
+  $("#rateSend").disabled = true;
+  $("#rateSend").onclick = sendRate;
+  paintTemp();
+  sheet.showModal();
+}
+
+function sendRate() {
+  if (!rate.code || !state.place) return;
+  const providers = visibleProviders().map((p) => state.results[p.id]).filter((r) => r && r.ok);
+  const report = Blend.reportFrom(providers, nowKey(), { code: rate.code, temp: rate.temp != null ? Math.round(rate.temp * 10) / 10 : null, wind: rate.wind });
+  report.saved = new Date().toISOString();
+  const list = store.get(rateKey(), []);
+  list.push(report);
+  store.set(rateKey(), list.slice(-60));
+  const n = Math.min(list.length, 60);
+  $("#rateThanks").textContent = n === 1
+    ? "Thanks! That's your first report here. The more you add, the better the Forecaster gets to know your spot."
+    : `Thanks! That's ${n} reports here. Sources that match what you see now count for more.`;
+  const sheet = $("#rateSheet");
+  sheet.classList.add("thanks");
+  render();
+  setTimeout(() => sheet.close(), 1800);
 }
 
 function forecastNotes(pred) {
@@ -949,13 +1044,14 @@ function renderForecastPage() {
   }
   const notes = forecastNotes(pred).map((p) => `<p>${esc(p)}</p>`).join("");
   const basisText = {
-    past: `Sources are weighted by how close their forecasts came to what <b>${esc(state.stations?.history?.name || "the nearest airport")}</b> actually measured over the last day.`,
+    past: `Sources are weighted by how close their forecasts came to what <b>${esc(state.stations?.history?.name || "the nearest airport")}</b> actually measured over the last day${pred.reports ? ", and to what you reported" : ""}.`,
     now: `Sources are weighted by how close they are to what <b>${pred.now.obs.tempN} nearby station${pred.now.obs.tempN === 1 ? "" : "s"}</b> read right now. As this phone saves more forecasts, the weights will switch to each source's track record over the past day.`,
     equal: "No station readings are available here yet, so every source counts equally.",
   }[pred.basis];
   const wrows = pred.weights.map((w) => {
     const lean = w.bias && Math.abs(fmt.tempDiff(w.bias)) >= 1 ? `, runs ${Math.abs(fmt.tempDiff(w.bias))}° ${w.bias > 0 ? "warm" : "cold"} here (corrected)` : "";
-    const detail = w.basis === "past" && w.err != null ? `${fmt.tempDiff(w.err) || "<1"}° off on average${lean}` : w.basis === "now" && w.err != null ? `${Math.round(fmt.tempDiff(w.err) * 10) / 10}° from stations now` : "";
+    let detail = w.basis === "past" && w.err != null ? `${fmt.tempDiff(w.err) || "<1"}° off on average${lean}` : w.basis === "now" && w.err != null ? `${Math.round(fmt.tempDiff(w.err) * 10) / 10}° from stations now` : "";
+    if (w.rated && w.rated.match != null) detail += `${detail ? " · " : ""}matched your reports ${Math.round(w.rated.match * 100)}%`;
     return `<div class="wrow"><div class="nm"><b>${esc(w.name)}</b><small>${detail}</small></div><div class="track"><i style="width:${(w.w / pred.weights[0].w) * 100}%"></i></div><div class="pc">${Math.round(w.w * 100)}%</div></div>`;
   }).join("");
   const adj = fmt.tempDiff(pred.now.tempAdj);
@@ -978,12 +1074,13 @@ function renderForecastPage() {
   }).join("");
 
   box.innerHTML = `
-    <section class="panel"><h2>Next 24 hours</h2>${hourChart(pred.hours.slice(0, 24))}
+    <section class="panel"><div class="ph"><h2>Next 24 hours</h2>${rateChip()}</div>${hourChart(pred.hours.slice(0, 24))}
       <div class="legend"><span><i style="background:var(--warm);opacity:.5"></i>Temperature</span><span><i style="background:var(--rain)"></i>Chance of rain</span><span><i style="background:var(--wind)"></i>Wind, ${fmt.windUnit()}</span></div></section>
     <section class="panel"><h2>Next 7 days</h2><div class="conf-key"><span><i class="conf high"></i>High</span><span><i class="conf medium"></i>Medium</span><span><i class="conf low"></i>Low confidence</span></div>${drows}</section>
     <section class="panel notes"><h2>Forecaster's notes</h2>${notes}
       <div class="byline">Worked out on this phone from ${pred.weights.length} forecasts and ${(state.stations?.stations || []).length} live stations.</div></section>
-    <section class="panel"><h2>How this forecast is made</h2><p class="how">Tailored to <b>${esc(state.place.gps ? "where you are" : state.place.name)}</b>${placeElev() != null ? ` (${Math.round(placeElev())} m above sea level)` : ""}, using stations within ${fmt.dist(40)}. Closer stations count more, and readings from higher or lower stations are corrected for height.</p><p class="how">${basisText}</p>${nowText}${wrows}</section>`;
+    <section class="panel"><h2>How this forecast is made</h2><p class="how">Tailored to <b>${esc(state.place.gps ? "where you are" : state.place.name)}</b>${placeElev() != null ? ` (${Math.round(placeElev())} m above sea level)` : ""}, using stations within ${fmt.dist(40)}. Closer stations count more, and readings from higher or lower stations are corrected for height.</p><p class="how">${basisText}</p>${nowText}${pred.reports ? `<p class="how">You've rated the weather here <b>${pred.reports} time${pred.reports === 1 ? "" : "s"}</b>. Sources whose forecasts matched what you saw count for more.</p>` : ""}${wrows}</section>`;
+  box.querySelector("[data-rate]").onclick = () => openRate(pred);
   box.querySelectorAll(".drow").forEach((b) => {
     b.onclick = () => { const i = Number(b.dataset.day); state.fday = state.fday === i ? null : i; render(); };
   });

@@ -95,3 +95,28 @@ test("stations on a hill are shifted to the place's height", () => {
   const r = predict({ providers: [src("a", 10)], stations: [hill], nowKey, placeElev: 10 });
   assert.ok(Math.abs(r.now.obs.temp - 9.95) < 0.01);
 });
+
+test("reports of what the weather was really like shift weight to the sources that matched", () => {
+  const { reportFrom, scoreReports } = globalThis.Blend;
+  const dry = src("dry", 10, { pop: 5, code: "partly" });
+  const wet = src("wet", 10, { pop: 80, code: "rain" });
+  const reports = [0, 1, 2].map(() => reportFrom([dry, wet], nowKey, { code: "rain", wind: "breezy" }));
+  assert.equal(reports[0].src.wet.code, "rain");
+  const s = scoreReports(reports);
+  assert.ok(s.wet.match > 0.9 && s.dry.match < 0.4, JSON.stringify(s));
+  const r = predict({ providers: [dry, wet], stations: [], nowKey, reports });
+  const w = Object.fromEntries(r.weights.map((x) => [x.id, x.w]));
+  assert.ok(w.wet > w.dry * 2, JSON.stringify(w));
+  assert.equal(r.reports, 3);
+});
+
+test("reported temperatures count towards each source's warm or cold lean", () => {
+  const { reportFrom } = globalThis.Blend;
+  const warm = src("warm", 14), right = src("right", 10);
+  const reports = [0, 1].map(() => reportFrom([warm, right], nowKey, { code: "cloudy", temp: 10 }));
+  const r = predict({ providers: [warm, right], stations: [], nowKey, reports });
+  assert.equal(r.basis, "past");
+  const wr = r.weights.find((x) => x.id === "warm");
+  assert.equal(Math.round(wr.bias), 4);
+  assert.ok(Math.abs(r.hours[0].temp - 10) < 0.5, String(r.hours[0].temp));
+});

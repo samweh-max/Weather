@@ -420,21 +420,37 @@ main { padding: 4px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, en
 .mk-me { width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--rain) 25%, transparent); display: grid; place-items: center; animation: me 2.4s ease-out infinite; }
 .mk-me i { width: 12px; height: 12px; border-radius: 50%; background: var(--rain); box-shadow: 0 0 0 2.5px #fff; }
 @keyframes me { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--rain) 45%, transparent); } 100% { box-shadow: 0 0 0 18px transparent; } }
-.map.offline { background: color-mix(in srgb, var(--rain) 22%, var(--bg)); }
-.map .land { fill: var(--surface); fill-opacity: 1; stroke: var(--faint); stroke-opacity: 0.5; }
-.leaflet-container { font-family: var(--font-body); background: var(--track); }
-.leaflet-popup-pane { z-index: 700; }
-.leaflet-popup-content-wrapper { border-radius: 14px; background: var(--surface); color: var(--ink); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25); }
-.leaflet-popup-tip { background: var(--surface); }
-.leaflet-popup-content { margin: 12px 14px; }
+.map .maplibregl-canvas { outline: none; }
+.map { background: #0b1530; }
+.st-pop .maplibregl-popup-content { border-radius: 14px; background: var(--surface); color: var(--ink); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25); padding: 12px 14px; font-family: var(--font-body); }
+.st-pop.maplibregl-popup-anchor-bottom .maplibregl-popup-tip { border-top-color: var(--surface); }
+.st-pop.maplibregl-popup-anchor-top .maplibregl-popup-tip { border-bottom-color: var(--surface); }
+.st-pop.maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--surface); }
+.st-pop.maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--surface); }
 .pop b { display: block; font-size: 14px; }
 .pop small { color: var(--muted); font-size: 12px; }
 .pop table { margin-top: 6px; border-collapse: collapse; font-size: 13px; }
 .pop td { padding: 2px 10px 2px 0; }
 .pop td:first-child { color: var(--muted); }
-.leaflet-control-attribution { font-size: 10px; background: color-mix(in srgb, var(--surface) 80%, transparent) !important; color: var(--muted); }
-.leaflet-control-attribution a { color: var(--muted); }
-.leaflet-bar a { background: var(--surface); color: var(--ink); border-color: var(--line); }
+.map .maplibregl-ctrl-attrib { font-size: 10px; background: color-mix(in srgb, var(--surface) 80%, transparent); color: var(--muted); }
+.map .maplibregl-ctrl-attrib a { color: var(--muted); }
+.map .maplibregl-ctrl-group { background: var(--surface); border-radius: 12px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); overflow: hidden; margin: 0 10px 10px 0; }
+.map .maplibregl-ctrl-group button { width: 34px; height: 34px; }
+.map .maplibregl-ctrl-group button + button { border-top: 1px solid var(--line); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .map .maplibregl-ctrl-icon { filter: invert(1); } }
+:root[data-theme="dark"] .map .maplibregl-ctrl-icon { filter: invert(1); }
+/* Map / Satellite switch. */
+.map-style { pointer-events: auto; display: inline-flex; padding: 3px; border-radius: 999px; background: color-mix(in srgb, var(--surface) 90%, transparent); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.map-style button { min-height: 28px; padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--muted); transition: background .2s, color .2s; }
+.map-style button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+#globeBtn { width: 34px; justify-content: center; padding: 0; margin-left: auto; }
+#globeBtn + #recentre { margin-left: 0; }
+/* With the radar on, hide stations and rain gauges so the rain shows clearly. */
+.map .st-mk { transition: visibility .25s; }
+.map.radar-on .st-mk, .map.far .st-mk { visibility: hidden; pointer-events: none; }
+.map-key.dim { opacity: .4; }
+/* Satellite: markers need a little more contrast against the imagery. */
+.map.sat .mk-temp:not(.official) { box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); }
 
 /* ---------- Icons ---------- */
 .wx { overflow: visible; }
@@ -478,9 +494,9 @@ input[type="search"] {
 .results li .sub { display: block; font-size: 13px; color: var(--muted); }
 .results li button.star { width: 44px; height: 44px; display: grid; place-items: center; color: var(--warn); font-size: 20px; }
 .results li.note { padding: 12px 2px; color: var(--muted); font-size: 14px; border: 0; }
-.seg { display: flex; background: var(--bg); border-radius: 12px; padding: 3px; }
-.seg button { flex: 1; padding: 9px 4px; border-radius: 9px; font-weight: 600; color: var(--muted); }
-.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(14, 26, 36, 0.14); }
+.seg, .rseg { display: flex; background: var(--bg); border-radius: 12px; padding: 3px; }
+.seg button, .rseg button { flex: 1; padding: 9px 4px; border-radius: 9px; font-weight: 600; color: var(--muted); }
+.seg button[aria-pressed="true"], .rseg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(14, 26, 36, 0.14); }
 .toggles { list-style: none; padding: 0; margin: 0; }
 .toggles li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
 .toggles .sub { display: block; font-size: 13px; color: var(--muted); }
@@ -491,12 +507,6 @@ input[type="search"] {
   * { animation: none !important; transition: none !important; }
 }
 
-/* OpenStreetMap fallback tiles (no CARTO key): calm the colours to match the app, and darken them in dark mode. */
-.map.osm .leaflet-tile-pane { filter: saturate(.45) contrast(.95) brightness(1.03); }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .map.osm .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) saturate(.35) brightness(.85) contrast(.9); }
-}
-:root[data-theme="dark"] .map.osm .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) saturate(.35) brightness(.85) contrast(.9); }
 
 /* Tappable days on the Forecaster, and their details */
 button.drow { width: 100%; font: inherit; color: inherit; text-align: left; background: none; border: 0; border-top: 1px solid var(--line); cursor: pointer; -webkit-tap-highlight-color: transparent; }
@@ -561,3 +571,31 @@ h2 + button.srow { border-top: 0; }
 .scrub-tip .w svg { width: 11px; height: 11px; }
 .panel > h2 + .chartwrap { margin-top: 34px; }
 .dday .chartwrap { margin-top: 34px; }
+
+/* ---------- Rate the forecast ---------- */
+.ph { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.ph h2 { margin: 0; }
+.rate-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px 5px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 600; color: var(--rain); background: color-mix(in srgb, var(--rain) 12%, transparent); transition: transform .15s; }
+.rate-chip:active { transform: scale(.95); }
+.rate-chip svg { width: 14px; height: 14px; }
+.rate-chip.done { color: var(--faint); background: transparent; padding-right: 2px; }
+.rate-sub { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+.sheet h3 span { text-transform: none; letter-spacing: 0; font-weight: 500; margin-left: 4px; }
+.rate-sky { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.rate-sky button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px 9px; border-radius: 14px; background: var(--bg); font-size: 12.5px; font-weight: 600; color: var(--muted); transition: background .15s, color .15s, box-shadow .15s, transform .15s; }
+.rate-sky button:active { transform: scale(.96); }
+.rate-sky button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 2px var(--rain), 0 2px 8px rgba(14, 26, 36, 0.12); }
+.rate-sky .ri { width: 34px; height: 34px; }
+.rate-step { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 10px; }
+.rate-step button { width: 40px; height: 40px; border-radius: 50%; background: var(--bg); font-size: 22px; font-weight: 500; color: var(--ink); }
+.rate-step output { min-width: 64px; text-align: center; font: 600 30px/1 var(--font-display); }
+.rate-send { width: 100%; margin-top: 20px; padding: 14px; border-radius: 14px; background: var(--rain); color: #fff; font-size: 16px; font-weight: 600; transition: opacity .2s; }
+.rate-send:disabled { opacity: .4; }
+.rate-done { display: none; flex-direction: column; align-items: center; text-align: center; padding: 26px 10px 18px; gap: 12px; color: var(--muted); }
+.rate-done svg { width: 54px; height: 54px; color: var(--good); }
+.rate-done svg path { stroke-dasharray: 40; stroke-dashoffset: 40; }
+.rate-done p { margin: 0; max-width: 300px; font-size: 15px; line-height: 1.45; }
+.sheet.rate.thanks .rate-form { display: none; }
+.sheet.rate.thanks .rate-done { display: flex; animation: up .3s ease-out; }
+.sheet.rate.thanks .rate-done svg path { animation: tick .45s .15s ease-out forwards; }
+@keyframes tick { to { stroke-dashoffset: 0; } }
