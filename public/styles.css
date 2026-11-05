@@ -538,29 +538,34 @@ h2 + button.srow { border-top: 0; }
 #main { view-transition-name: page; }
 .sky { view-transition-name: sky; }
 .tabs { view-transition-name: tabs; }
-::view-transition-group(*) { animation-duration: 0.38s; animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
+/* One continuous swipe: everything moves together on the same curve and for the same time, like
+   turning a page. The old page slides fully out as the new one slides fully in, edge to edge,
+   with no fading, so there is never a gap or a flash. */
+:root { --swipe: 0.5s; --swipe-ease: cubic-bezier(0.32, 0.72, 0, 1); --dx: 100%; }
+:root[data-dir="back"] { --dx: -100%; }
+::view-transition-group(*) { animation-duration: var(--swipe); animation-timing-function: var(--swipe-ease); }
 /* The tab bubble hops across during a page change instead of fading. */
 ::view-transition-group(tab-blob) { animation-duration: 0.5s; animation-timing-function: cubic-bezier(0.34, 1.45, 0.64, 1); }
 ::view-transition-old(tab-blob) { display: none; }
 ::view-transition-new(tab-blob) { animation: hop 0.5s cubic-bezier(0.3, 0.7, 0.4, 1); }
-::view-transition-old(page) { animation: page-out 0.24s cubic-bezier(0.4, 0, 1, 1) both; }
-::view-transition-new(page) { animation: page-in 0.38s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+::view-transition-image-pair(page) { isolation: auto; }
+::view-transition-old(page) { animation: swipe-out var(--swipe) var(--swipe-ease) both; mix-blend-mode: normal; }
+::view-transition-new(page) { animation: swipe-in var(--swipe) var(--swipe-ease) both; mix-blend-mode: normal; }
+@keyframes swipe-out { to { transform: translateX(calc(var(--dx) * -1)); } }
+@keyframes swipe-in { from { transform: translateX(var(--dx)); } }
 /* The sky keeps its natural size and is clipped as it grows or shrinks, so its text never stretches. */
 ::view-transition-group(sky) { overflow: hidden; border-radius: 0 0 22px 22px; }
 ::view-transition-old(sky), ::view-transition-new(sky) { height: auto; width: 100%; object-fit: none; object-position: top; }
 /* A true cross-fade: both images add up to full strength all the way through, so nothing dips or flashes. */
 ::view-transition-old(sky), ::view-transition-new(sky) { mix-blend-mode: plus-lighter; }
 ::view-transition-image-pair(sky) { isolation: isolate; }
-::view-transition-old(sky) { animation: fade-out 0.3s ease-in-out both; }
-::view-transition-new(sky) { animation: fade-in 0.3s ease-in-out both; }
+::view-transition-old(sky) { animation: fade-out var(--swipe) var(--swipe-ease) both; }
+::view-transition-new(sky) { animation: fade-in var(--swipe) var(--swipe-ease) both; }
 @keyframes fade-out { to { opacity: 0; } }
 @keyframes fade-in { from { opacity: 0; } }
-@keyframes page-out { to { opacity: 0; transform: translateX(calc(var(--dx) * -1)) scale(0.985); } }
-@keyframes page-in { from { opacity: 0; transform: translateX(var(--dx)) scale(0.985); } }
-:root { --dx: 36px; }
-:root[data-dir="back"] { --dx: -36px; }
-/* Browsers without view transitions still get the slide in. */
-#main.page-in { animation: page-in 0.38s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+/* Browsers without view transitions still get the new page sliding in. */
+@keyframes page-in { from { opacity: 0; transform: translateX(calc(var(--dx) * 0.3)); } }
+#main.page-in { animation: page-in var(--swipe) var(--swipe-ease) both; }
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }
@@ -680,25 +685,14 @@ body.on-globe #main { padding-bottom: 0; }
 .map .maplibregl-canvas { transition: filter .5s ease-out; }
 .map.globe:not(.intro) .maplibregl-canvas { filter: drop-shadow(0 0 2px rgba(150, 200, 255, 0.9)) drop-shadow(0 0 22px color-mix(in srgb, var(--rain) 60%, transparent)); }
 
-/* Going to Stations: the page drops away and the cards rise as a sheet over the globe, which grows in.
-   Leaving: the sheet slides down and the globe recedes. */
 /* The globe sits above the old page's backdrop but below the sky bar, the cards and the tab bar. */
 ::view-transition-group(globe) { z-index: 0; }
 ::view-transition-group(sky), ::view-transition-group(page), ::view-transition-group(tabs), ::view-transition-group(tab-blob) { z-index: 1; }
 ::view-transition-group(tabs) { z-index: 2; }
 ::view-transition-group(tab-blob) { z-index: 3; }
-::view-transition-new(globe) { animation: globe-in .7s cubic-bezier(.2, .8, .2, 1) both; }
-::view-transition-old(globe) { animation: globe-out .35s cubic-bezier(.4, 0, 1, 1) both; }
-@keyframes globe-in { from { opacity: 0; transform: scale(1.18); } }
-@keyframes globe-out { to { opacity: 0; transform: scale(.9); } }
-:root[data-to="stations"]::view-transition-old(page) { animation: page-drop .32s cubic-bezier(.4, 0, 1, 1) both; }
-:root[data-to="stations"]::view-transition-new(page) { animation: sheet-up .6s .08s cubic-bezier(.2, .9, .25, 1) both; }
-:root[data-from="stations"]::view-transition-old(page) { animation: sheet-down .3s cubic-bezier(.4, 0, 1, 1) both; }
-:root[data-from="stations"]::view-transition-new(page) { animation: rise-in .45s .05s cubic-bezier(.2, .8, .2, 1) both; }
-@keyframes page-drop { to { opacity: 0; transform: translateY(18vh) scale(.94); } }
-@keyframes sheet-up { from { transform: translateY(45vh); } }
-@keyframes sheet-down { to { transform: translateY(50vh); opacity: .4; } }
-@keyframes rise-in { from { opacity: 0; transform: translateY(6vh) scale(.98); } }
+/* The globe swipes in and out with its page, as one piece with the sheet of cards on it. */
+::view-transition-new(globe) { animation: swipe-in var(--swipe) var(--swipe-ease) both; }
+::view-transition-old(globe) { animation: swipe-out var(--swipe) var(--swipe-ease) both; }
 
 /* Dragging the Stations sheet. The handle takes the drag; the rest of the sheet scrolls as usual. */
 .st-handle { touch-action: none; cursor: grab; margin: -8px calc(-1 * max(16px, env(safe-area-inset-left, 0px))) 0; padding: 8px max(16px, env(safe-area-inset-left, 0px)) 6px; border-radius: 26px 26px 0 0; }
