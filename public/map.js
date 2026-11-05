@@ -42,7 +42,7 @@
     document.documentElement.dataset.theme === "dark" ||
     (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
 
-  function readStyle() { try { return localStorage.getItem(STYLE_KEY) === "sat" ? "sat" : "map"; } catch { return "map"; } }
+  function readStyle() { try { return localStorage.getItem(STYLE_KEY) === "map" ? "map" : "sat"; } catch { return "map"; } }
   function saveStyle(s) { try { localStorage.setItem(STYLE_KEY, s); } catch {} }
 
   // CARTO's street maps need a free key (CARTO_KEY). Without one, fall back to OpenStreetMap's own tiles.
@@ -78,6 +78,10 @@
     "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0],
   };
 
+  // Light the globe from the viewer's side, so the atmosphere is an even glow all round.
+  const LIGHT = { anchor: "viewport", position: [1.5, 180, 0] };
+  // (The soft glow around the globe and its shading are drawn by the page, see .globe-fx.)
+
   function baseStyle() {
     const sources = {}, layers = [{ id: "bg", type: "background", paint: { "background-color": dark() ? "#16202b" : "#dfe7ee" } }];
     if (window.DEMO_LAND) {
@@ -95,7 +99,7 @@
         { id: "satLabels", type: "raster", source: "satLabels", paint: { "raster-fade-duration": 150 }, layout: { visibility: style === "sat" ? "visible" : "none" } },
       );
     }
-    return { version: 8, projection: { type: "globe" }, sky: SKY, sources, layers };
+    return { version: 8, projection: { type: "globe" }, sky: SKY, light: LIGHT, sources, layers };
   }
 
   function setStyle(s) {
@@ -114,6 +118,65 @@
     map.getSource("street").setTiles(streetTiles());
     for (const [k, v] of Object.entries(streetPaint())) map.setPaintProperty("street", k, v);
     map.setPaintProperty("bg", "background-color", dark() ? "#16202b" : "#dfe7ee");
+  }
+
+  // The globe's radius on screen. Walk east from the centre along a great circle: the point that
+  // lands furthest from the centre on screen is the globe's visible edge.
+  function globeRadius() {
+    const c = map.getCenter(), o = map.project(c);
+    const r = Math.PI / 180, f1 = c.lat * r;
+    let best = 0;
+    for (let d = 40; d <= 90; d += 1) {
+      const dd = d * r;
+      const f2 = Math.asin(Math.sin(f1) * Math.cos(dd));
+      const l2 = c.lng + Math.atan2(Math.sin(dd) * Math.cos(f1), Math.cos(dd) - Math.sin(f1) * Math.sin(f2)) / r;
+      const e = map.project([l2, f2 / r]);
+      best = Math.max(best, Math.hypot(e.x - o.x, e.y - o.y));
+    }
+    return best || 1;
+  }
+  // The zoom at which the whole Earth fits the map with a little room around it.
+  function globeZoom() {
+    const box = map.getContainer();
+    const want = Math.min(box.clientWidth, box.clientHeight) / 2 - 12;
+    return map.getZoom() + Math.log2(want / globeRadius());
+  }
+  const atGlobe = () => map.getZoom() < 3;
+  // The globe zoom for a given centre, without moving the map.
+  function globeZoomAt(center) {
+    const c = map.getCenter(), z = map.getZoom();
+    map.jumpTo({ center, zoom: 1 });
+    const out = globeZoom();
+    map.jumpTo({ center: c, zoom: z });
+    return out;
+  }
+
+  // A slow turn of the Earth while nobody is touching it, like a desk globe.
+  let spinOn = false, spinLast = 0;
+  function spin(ts) {
+    if (!spinOn || !map) return;
+    if (spinLast && atGlobe() && map.getContainer().offsetParent && !map.isMoving()) {
+      const c = map.getCenter();
+      map.setCenter([c.lng + Math.min(ts - spinLast, 50) * 0.0025, c.lat]);
+    }
+    spinLast = ts;
+    requestAnimationFrame(spin);
+  }
+  function startSpin() {
+    if (spinOn || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    spinOn = true;
+    spinLast = 0;
+    requestAnimationFrame(spin);
+  }
+  const stopSpin = () => { spinOn = false; };
+
+  function toGlobe() {
+    map.flyTo({ center: [placeAt.lon, placeAt.lat - 8], zoom: globeZoomAt([placeAt.lon, placeAt.lat - 8]), bearing: 0, pitch: 0, duration: 1800, essential: true });
+    map.once("moveend", startSpin);
+  }
+  function toPlace() {
+    stopSpin();
+    map.flyTo({ center: [placeAt.lon, placeAt.lat], zoom: 9, bearing: 0, duration: 2200, curve: 1.6, essential: true });
   }
 
   // Colour for a temperature, cold blue through to hot orange.
@@ -298,18 +361,40 @@
       } else {
         container.classList.add("offline");
       }
+      container.classList.add("intro");
       map = new maplibregl.Map({
         container,
         style: baseStyle(),
-        center: [place.lon, place.lat],
-        zoom: 9,
+        center: [place.lon, place.lat - 8],
+        zoom: 1,
         maxZoom: 17,
         attributionControl: false,
         dragRotate: true,
         pitchWithRotate: false,
         renderWorldCopies: false,
+        // Keep the last frame so the page slide between tabs shows the globe, not a blank box.
+        canvasContextAttributes: { preserveDrawingBuffer: true, antialias: true },
       });
       map.touchPitch.disable();
+      // Open on the whole Earth, floating on the page, turning slowly; it fades and grows in.
+      map.once("load", () => {
+        map.resize();
+        map.jumpTo({ zoom: globeZoom() });
+        requestAnimationFrame(() => container.classList.remove("intro"));
+        startSpin();
+      });
+      ["mousedown", "touchstart", "wheel"].forEach((ev) => container.addEventListener(ev, stopSpin, { passive: true }));
+      // Size the glow around the globe and the shading on it to match the globe on screen.
+      const panel = container.parentElement;
+      const near = () => {
+        container.classList.toggle("globe", atGlobe());
+        const r = atGlobe() ? globeRadius() : 4000;
+        panel.style.setProperty("--gr", r.toFixed(1) + "px");
+        panel.style.setProperty("--mh", container.clientHeight + "px");
+      };
+      map.on("move", near);
+      map.on("zoom", near);
+      near();
       map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-left");
       map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), "bottom-right");
       container.classList.toggle("sat", style === "sat");
@@ -317,12 +402,13 @@
       // Zoomed out to the globe, station labels would pile on top of each other: hide them.
       const far = () => container.classList.toggle("far", map.getZoom() < 5);
       map.on("zoom", far);
+      far();
       map.on("moveend", () => { clearTimeout(map._t); map._t = setTimeout(fetchAround, 500); });
       lastFetch = { lat: place.lat, lng: place.lon };
       document.getElementById("radarBtn").onclick = (e) => setRadar(e.currentTarget.getAttribute("aria-pressed") !== "true");
       document.getElementById("radarPlay").onclick = toggleRadarPlay;
-      document.getElementById("recentre").onclick = () => map.flyTo({ center: [placeAt.lon, placeAt.lat], zoom: 10, bearing: 0, duration: 1600, essential: true });
-      document.getElementById("globeBtn").onclick = () => map.flyTo({ center: [placeAt.lon, placeAt.lat], zoom: 0.6, bearing: 0, duration: 1800, essential: true });
+      document.getElementById("recentre").onclick = toPlace;
+      document.getElementById("globeBtn").onclick = toGlobe;
       document.querySelectorAll("#mapStyle button").forEach((b) => (b.onclick = () => setStyle(b.dataset.style)));
       document.getElementById("mapStyle").hidden = !!window.DEMO_LAND;
       setStyle(style);
@@ -335,7 +421,8 @@
     if (placeMarker) placeMarker.remove();
     placeMarker = new maplibregl.Marker({ element: el("<i></i>", "mk-me"), anchor: "center" }).setLngLat([place.lon, place.lat]).addTo(map);
     placeMarker.getElement().style.zIndex = "5";
-    placeMarker.getElement().style.pointerEvents = "none";
+    placeMarker.getElement().onclick = () => { if (atGlobe()) toPlace(); };
+    placeMarker.getElement().setAttribute("aria-label", "Zoom in to stations near you");
     if (map.loaded()) addStations(stations); else map.once("load", () => addStations(stations));
     setTimeout(() => map.resize(), 50);
   }

@@ -393,21 +393,39 @@ const SUN_DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h16M
 
 // A day-long strip from midnight to midnight: night, the glow of sunrise, daylight, sunset, night.
 // On today it also shows where the sun is right now.
+// Sunrise to sunset as the sun's path: a flat horizon from midnight to midnight with an arc
+// over the daylight hours. Today, the part of the arc already travelled is filled in and a
+// soft sun sits where the sun is now (or a small moon on the horizon at night).
 function sunBar(date) {
   if (!state.place || !date) return "";
   const t = sunTimes(date, state.place.lat, state.place.lon);
   if (t.polar) return `<div class="sun"><div class="sun-lbl one">${t.polar === "day" ? "The sun doesn't set today" : "The sun doesn't rise today"}</div></div>`;
   const r = placeClock(t.rise), st = placeClock(t.set);
-  const a = (r.mins / 1440) * 100, b = (st.mins / 1440) * 100;
   const len = st.mins - r.mins;
-  let dot = "";
+  const W = 340, H = 46, base = 40, peak = 30;
+  const ax = (r.mins / 1440) * W, bx = (st.mins / 1440) * W;
+  const cx = (ax + bx) / 2, rx = (bx - ax) / 2;
+  const arc = `M${ax.toFixed(1)} ${base} A${rx.toFixed(1)} ${peak} 0 0 1 ${bx.toFixed(1)} ${base}`;
+  let g = `<line class="hz" x1="0" x2="${W}" y1="${base}" y2="${base}"/>`;
+  g += `<path class="arc" d="${arc}"/>`;
+  g += `<circle class="edge" cx="${ax.toFixed(1)}" cy="${base}" r="2.5"/><circle class="edge" cx="${bx.toFixed(1)}" cy="${base}" r="2.5"/>`;
   if (date === placeToday()) {
     const now = placeClock(new Date()).mins;
-    const up = now > r.mins && now < st.mins;
-    dot = `<span class="sun-now ${up ? "up" : "down"}" style="left:${((now / 1440) * 100).toFixed(1)}%" title="Now"></span>`;
+    const nx = (now / 1440) * W;
+    if (now > r.mins && now < st.mins) {
+      const th = Math.PI * (1 - (now - r.mins) / len);
+      const sx = cx + rx * Math.cos(th), sy = base - peak * Math.sin(th);
+      const id = "sunclip" + (++chartSeq);
+      g = `<defs><clipPath id="${id}"><rect x="0" y="0" width="${sx.toFixed(1)}" height="${base}"/></clipPath>
+        <radialGradient id="${id}g"><stop offset="0" stop-color="#fff6e6" stop-opacity=".9"/><stop offset="1" stop-color="#ffd9a8" stop-opacity="0"/></radialGradient></defs>` + g;
+      g += `<path class="done-fill" d="${arc} Z" clip-path="url(#${id})"/><path class="done" d="${arc}" clip-path="url(#${id})"/>`;
+      g += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="13" fill="url(#${id}g)"/><circle class="sun-dot" cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="5"/>`;
+    } else {
+      g += `<circle class="moon-dot" cx="${nx.toFixed(1)}" cy="${base}" r="4"/>`;
+    }
   }
   return `<div class="sun" aria-label="Sunrise ${r.text}, sunset ${st.text}">
-      <div class="sun-track" style="--a:${a.toFixed(1)}%;--b:${b.toFixed(1)}%"><span class="sun-day"></span>${dot}</div>
+      <svg class="sun-arc" viewBox="0 0 ${W} ${H}" aria-hidden="true">${g}</svg>
       <div class="sun-lbl"><span>${SUN_UP}${r.text}</span><span class="len">${Math.floor(len / 60)} h ${len % 60} min of daylight</span><span>${st.text}${SUN_DOWN}</span></div>
     </div>`;
 }
