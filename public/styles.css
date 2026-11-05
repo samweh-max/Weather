@@ -536,6 +536,7 @@ h2 + button.srow { border-top: 0; }
 
 /* Page changes: the content slides in the direction of travel, the sky panel morphs size, the tab bar stays put. */
 #main { view-transition-name: page; }
+.days { view-transition-name: days; }
 .sky { view-transition-name: sky; }
 .tabs { view-transition-name: tabs; }
 /* One continuous swipe: everything moves together on the same curve and for the same time, like
@@ -549,18 +550,30 @@ h2 + button.srow { border-top: 0; }
 ::view-transition-old(tab-blob) { display: none; }
 ::view-transition-new(tab-blob) { animation: hop 0.5s cubic-bezier(0.3, 0.7, 0.4, 1); }
 ::view-transition-image-pair(page) { isolation: auto; }
+::view-transition-old(days) { animation: swipe-out var(--swipe) var(--swipe-ease) both; }
+::view-transition-new(days) { animation: swipe-in var(--swipe) var(--swipe-ease) both; }
 ::view-transition-old(page) { animation: swipe-out var(--swipe) var(--swipe-ease) both; mix-blend-mode: normal; }
 ::view-transition-new(page) { animation: swipe-in var(--swipe) var(--swipe-ease) both; mix-blend-mode: normal; }
 @keyframes swipe-out { to { transform: translateX(calc(var(--dx) * -1)); } }
 @keyframes swipe-in { from { transform: translateX(var(--dx)); } }
 /* The sky keeps its natural size and is clipped as it grows or shrinks, so its text never stretches. */
+/* The weather panel folds like an accordion: its background grows or shrinks between the full
+   and slim sizes, the place row stays put, and the weather details fold away under the
+   moving bottom edge while the new ones unfold in. */
+.sky-top { view-transition-name: skytop; }
+#hero { view-transition-name: hero; }
 ::view-transition-group(sky) { overflow: hidden; border-radius: 0 0 22px 22px; }
-::view-transition-old(sky), ::view-transition-new(sky) { height: auto; width: 100%; object-fit: none; object-position: top; }
-/* A true cross-fade: both images add up to full strength all the way through, so nothing dips or flashes. */
+::view-transition-old(sky), ::view-transition-new(sky) { height: 100%; width: 100%; object-fit: cover; object-position: top; }
 ::view-transition-old(sky), ::view-transition-new(sky) { mix-blend-mode: plus-lighter; }
 ::view-transition-image-pair(sky) { isolation: isolate; }
 ::view-transition-old(sky) { animation: fade-out var(--swipe) var(--swipe-ease) both; }
 ::view-transition-new(sky) { animation: fade-in var(--swipe) var(--swipe-ease) both; }
+::view-transition-group(hero) { overflow: hidden; }
+::view-transition-old(hero), ::view-transition-new(hero) { height: auto; width: 100%; object-fit: none; object-position: top; transform-origin: top; }
+::view-transition-old(hero) { animation: fold-up calc(var(--swipe) * 0.4) ease-in both; }
+::view-transition-new(hero) { animation: fold-down calc(var(--swipe) * 0.8) var(--swipe-ease) calc(var(--swipe) * 0.15) both; }
+@keyframes fold-up { to { opacity: 0; transform: translateY(-14px) scaleY(0.92); } }
+@keyframes fold-down { from { opacity: 0; transform: translateY(-14px) scaleY(0.92); } }
 @keyframes fade-out { to { opacity: 0; } }
 @keyframes fade-in { from { opacity: 0; } }
 /* Browsers without view transitions still get the new page sliding in. */
@@ -687,9 +700,10 @@ body.on-globe #main { padding-bottom: 0; }
 
 /* The globe sits above the old page's backdrop but below the sky bar, the cards and the tab bar. */
 ::view-transition-group(globe) { z-index: 0; }
-::view-transition-group(sky), ::view-transition-group(page), ::view-transition-group(tabs), ::view-transition-group(tab-blob) { z-index: 1; }
-::view-transition-group(tabs) { z-index: 2; }
-::view-transition-group(tab-blob) { z-index: 3; }
+::view-transition-group(sky), ::view-transition-group(page), ::view-transition-group(days), ::view-transition-group(tabs), ::view-transition-group(tab-blob) { z-index: 1; }
+::view-transition-group(skytop), ::view-transition-group(hero) { z-index: 2; }
+::view-transition-group(tabs) { z-index: 3; }
+::view-transition-group(tab-blob) { z-index: 4; }
 /* The globe swipes in and out with its page, as one piece with the sheet of cards on it. */
 ::view-transition-new(globe) { animation: swipe-in var(--swipe) var(--swipe-ease) both; }
 ::view-transition-old(globe) { animation: swipe-out var(--swipe) var(--swipe-ease) both; }
