@@ -223,9 +223,30 @@ main { padding: 4px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, en
 /* ---------- Compare ---------- */
 .compare-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 0 4px; }
 .compare-head h2 { margin: 0; font: 600 19px/1.2 var(--font-display); letter-spacing: -0.01em; }
-.modes { display: flex; background: var(--track); border-radius: 999px; padding: 3px; }
-.modes button { padding: 6px 11px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--muted); min-height: 34px; }
-.modes button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(14, 26, 36, 0.12); }
+.modes { position: relative; display: flex; background: var(--track); border-radius: 999px; padding: 3px; }
+.modes button {
+  position: relative; z-index: 1; display: grid; place-items: center;
+  padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--muted); min-height: 34px; min-width: 40px;
+  transition: color 0.25s ease;
+}
+.modes button svg { width: 18px; height: 18px; transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.modes button[aria-selected="true"] { color: var(--ink); }
+.modes button[aria-selected="true"] svg { transform: scale(1.1); }
+.modes button[data-mode="temp"][aria-selected="true"] { color: var(--warm); }
+.modes button[data-mode="rain"][aria-selected="true"] { color: var(--rain); }
+.modes button[data-mode="wind"][aria-selected="true"] { color: var(--wind); }
+.mode-blob {
+  position: absolute; top: 3px; bottom: 3px; left: 0; width: var(--w, 0px);
+  transform: translateX(var(--x, 0px)); border-radius: 999px;
+  background: radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0) 60%), var(--surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 1px 3px rgba(14, 26, 36, 0.12), 0 3px 10px -4px rgba(14, 26, 36, 0.2);
+  transition: transform 0.5s cubic-bezier(0.34, 1.45, 0.64, 1), width 0.3s ease;
+}
+.mode-blob.hop { animation: hop 0.5s cubic-bezier(0.3, 0.7, 0.4, 1); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mode-blob { background: radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 60%), var(--surface); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 8px -2px rgba(0, 0, 0, 0.5); }
+}
+:root[data-theme="dark"] .mode-blob { background: radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 60%), var(--surface); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 8px -2px rgba(0, 0, 0, 0.5); }
 
 .group { margin: 16px 2px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
 .card { background: var(--surface); border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--line); overflow: hidden; }
@@ -257,14 +278,19 @@ main { padding: 4px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, en
 .viz.wind .b { text-align: right; line-height: 1.1; }
 .viz.wind .b small { display: block; font-size: 10px; font-weight: 500; color: var(--muted); }
 .viz.wind .mm { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
-.viz.all { grid-template-columns: 1fr 1fr 1.15fr; gap: 6px; align-items: start; }
-.viz.all > span { display: grid; justify-items: end; line-height: 1.15; font-weight: 600; }
-.viz.all small { font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; }
-.viz.all .t small { color: var(--muted); }
-.viz.all .r { color: var(--rain); }
-.viz.all .w { color: var(--wind); grid-template-columns: auto auto; column-gap: 3px; align-items: center; }
-.viz.all .w svg { width: 12px; height: 12px; }
-.viz.all .w small { grid-column: 1 / -1; }
+.viz.all { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+.chip {
+  display: grid; grid-template-columns: 13px auto; column-gap: 4px; align-items: center; justify-content: center;
+  padding: 5px 4px 4px; border-radius: 11px; line-height: 1.15; min-width: 0;
+  background: color-mix(in srgb, var(--c) 11%, transparent);
+}
+.chip svg { width: 13px; height: 13px; color: var(--c); }
+.chip b { font-weight: 650; font-size: 15px; white-space: nowrap; }
+.chip small { grid-column: 1 / -1; text-align: center; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip.t { --c: var(--warm); }
+.chip.r { --c: var(--rain); }
+.chip.r b { color: var(--rain); }
+.chip.w { --c: var(--wind); }
 .row .msg { grid-column: 2 / -1; font-size: 13px; color: var(--muted); text-align: right; }
 .row.off .n { color: var(--muted); }
 .diff { display: inline-block; font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }

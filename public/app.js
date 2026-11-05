@@ -523,8 +523,20 @@ function renderDays(ds) {
   if (sel && state.day > 2) sel.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
+// The chosen mode sits in a glass bubble that hops between buttons, like the tab bar.
+let blobMode = null;
 function renderModes() {
   document.querySelectorAll("#modes button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === state.mode)));
+  const blob = $(".mode-blob"), btn = $(`#modes button[data-mode="${state.mode}"]`);
+  if (!blob || !btn || !btn.offsetWidth) return;
+  blob.style.setProperty("--x", btn.offsetLeft + "px");
+  blob.style.setProperty("--w", btn.offsetWidth + "px");
+  if (blobMode && blobMode !== state.mode) {
+    blob.classList.remove("hop");
+    void blob.offsetWidth;
+    blob.classList.add("hop");
+  }
+  blobMode = state.mode;
 }
 
 function renderList(date, c) {
@@ -576,13 +588,18 @@ function renderRow(p, date, scale) {
   return row;
 }
 
+const ICON_TEMP = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13.5V5a2 2 0 1 1 4 0v8.5a4 4 0 1 1-4 0z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><circle cx="12" cy="17" r="2" fill="currentColor"/></svg>`;
+const ICON_DROP = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5s-6 6.6-6 10.7a6 6 0 0 0 12 0C18 10.1 12 3.5 12 3.5z" fill="currentColor"/></svg>`;
 function vizFor(d, s) {
   if (state.mode === "all") {
-    // Everything at a glance: high / low, chance of rain, and wind.
+    // Everything at a glance: three small tinted chips for temperature, rain and wind.
     const pop = d.pop != null ? Math.round(d.pop) + "%" : "–";
-    return `<div class="viz all"><span class="t"><b>${fmt.temp(d.hi)}</b><small>${fmt.temp(d.lo)}</small></span>
-      <span class="r">${pop}${d.mm ? `<small>${fmt.rain(d.mm)}</small>` : ""}</span>
-      <span class="w">${windArrow(d.dir, "")}${d.wind != null ? fmt.windNum(d.wind) : "–"}${d.gust != null ? `<small>gust ${fmt.windNum(d.gust)}</small>` : ""}</span></div>`;
+    const chip = (cls, ico, main, sub) => `<span class="chip ${cls}">${ico}<b>${main}</b><small>${sub || "&nbsp;"}</small></span>`;
+    return `<div class="viz all">
+      ${chip("t", ICON_TEMP, fmt.temp(d.hi), fmt.temp(d.lo))}
+      ${chip("r", ICON_DROP, pop, d.mm ? fmt.rain(d.mm) : d.pop != null ? "chance" : "")}
+      ${chip("w", windArrow(d.dir, ""), d.wind != null ? fmt.windNum(d.wind) : "–", d.gust != null ? "gust " + fmt.windNum(d.gust) : fmt.windUnit())}
+    </div>`;
   }
   if (state.mode === "rain") {
     const pop = d.pop != null ? Math.round(d.pop) : null;
@@ -1747,7 +1764,7 @@ function init() {
   $("#search").oninput = onSearch;
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => goPage(b.dataset.page)));
   window.addEventListener("hashchange", () => switchPage(pageFromHash()));
-  window.addEventListener("resize", placeTabBlob);
+  window.addEventListener("resize", () => { placeTabBlob(); renderModes(); });
   initChartScrub();
   // The Stations sheet and globe are laid out around the sky bar, so track its height.
   const skyH = () => {
@@ -1761,7 +1778,7 @@ function init() {
     skyH();
   });
   skyH();
-  if (document.fonts) document.fonts.ready.then(placeTabBlob);
+  if (document.fonts) document.fonts.ready.then(() => { placeTabBlob(); renderModes(); });
   state.page = pageFromHash();
   document.querySelectorAll("#modes button").forEach((b) => (b.onclick = () => {
     state.mode = b.dataset.mode;
