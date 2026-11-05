@@ -17,7 +17,7 @@ BBC Weather and Apple Weather are not included. BBC has no public API, and Apple
 - **Forecaster:** one forecast blended from every source and checked against live stations, with written notes, a 24-hour chart, 7 days with confidence, and a breakdown of how much each source counts.
 - **Stations:** an interactive map of live station readings (temperature, wind arrows, rain gauges) with the last two hours of rain radar, plus a list of the nearest stations. Pan the map and stations for the new area load in.
 
-The map is a 3D globe drawn with [MapLibre GL](https://maplibre.org/). Street maps come from CARTO (with a `CARTO_KEY`) or OpenStreetMap, satellite imagery from Esri World Imagery, and rain radar from [RainViewer](https://www.rainviewer.com/api.html) (free for personal use, past two hours only).
+The map is a 3D globe drawn with [MapLibre GL](https://maplibre.org/). Street maps and all names are vector tiles from [OpenFreeMap](https://openfreemap.org/) (free, no key; falls back to OpenStreetMap picture tiles), satellite imagery from Esri World Imagery, and rain radar from [RainViewer](https://www.rainviewer.com/api.html) (free for personal use, past two hours only).
 
 ### How the Forecaster works
 
