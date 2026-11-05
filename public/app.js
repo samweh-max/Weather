@@ -318,6 +318,10 @@ function render() {
   $("#days").hidden = page !== "compare";
   // On the Stations page the sky panel shrinks to a slim bar so the map gets the room.
   $("#sky").classList.toggle("compact", page === "stations");
+  // On Stations the globe fills the page behind everything and the cards sit on a sheet above it.
+  $("#globeLayer").hidden = page !== "stations";
+  document.body.classList.toggle("on-globe", page === "stations");
+  if (page === "stations") document.documentElement.style.setProperty("--sheet-top", Math.round(window.innerHeight * 0.6) + "px");
   if (page === "forecast") {
     const pred = renderForecastPage();
     if (pred && pred.days.length) applyHero(heroForecast(pred));
@@ -802,6 +806,8 @@ function switchPage(p, before) {
   };
   const still = from === to || matchMedia("(prefers-reduced-motion: reduce)").matches;
   document.documentElement.dataset.dir = to > from ? "fwd" : "back";
+  document.documentElement.dataset.to = p;
+  document.documentElement.dataset.from = state.page;
   if (still) return swap();
   if (document.startViewTransition) {
     // The view transition animates the bubble itself, so the live one jumps straight there.
@@ -1620,6 +1626,17 @@ function init() {
   window.addEventListener("hashchange", () => switchPage(pageFromHash()));
   window.addEventListener("resize", placeTabBlob);
   initChartScrub();
+  // The Stations sheet and globe are laid out around the sky bar, so track its height.
+  const skyH = () => {
+    document.documentElement.style.setProperty("--sky-h", $("#sky").offsetHeight + "px");
+    if (state.page === "stations" && window.StationMap) StationMap.refit();
+  };
+  if (window.ResizeObserver) new ResizeObserver(skyH).observe($("#sky"));
+  window.addEventListener("resize", () => {
+    document.documentElement.style.setProperty("--sheet-top", Math.round(window.innerHeight * 0.6) + "px");
+    skyH();
+  });
+  skyH();
   if (document.fonts) document.fonts.ready.then(placeTabBlob);
   state.page = pageFromHash();
   document.querySelectorAll("#modes button").forEach((b) => (b.onclick = () => {

@@ -136,9 +136,21 @@
     return best || 1;
   }
   // The zoom at which the whole Earth fits the map with a little room around it.
-  function globeZoom() {
+  // The open space for the globe: below the sky bar and its buttons, above the sheet of cards.
+  function space() {
     const box = map.getContainer();
-    const want = Math.min(box.clientWidth, box.clientHeight) / 2 - 12;
+    const css = getComputedStyle(document.documentElement);
+    const top = (parseFloat(css.getPropertyValue("--sky-h")) || 100) + 50;
+    const bottom = parseFloat(css.getPropertyValue("--sheet-top")) || box.clientHeight * 0.6;
+    return { top, bottom: Math.max(0, box.clientHeight - bottom), w: box.clientWidth, h: Math.max(120, bottom - top) };
+  }
+  function fitPadding() {
+    const sp = space();
+    map.setPadding({ top: sp.top, bottom: sp.bottom, left: 0, right: 0 });
+  }
+  function globeZoom() {
+    const sp = space();
+    const want = Math.min(sp.w, sp.h) / 2 - 8;
     return map.getZoom() + Math.log2(want / globeRadius());
   }
   const atGlobe = () => map.getZoom() < 3;
@@ -171,7 +183,7 @@
   const stopSpin = () => { spinOn = false; };
 
   function toGlobe() {
-    map.flyTo({ center: [placeAt.lon, placeAt.lat - 8], zoom: globeZoomAt([placeAt.lon, placeAt.lat - 8]), bearing: 0, pitch: 0, duration: 1800, essential: true });
+    map.flyTo({ center: [placeAt.lon, placeAt.lat - 12], zoom: globeZoomAt([placeAt.lon, placeAt.lat - 12]), bearing: 0, pitch: 0, duration: 1800, essential: true });
     map.once("moveend", startSpin);
   }
   function toPlace() {
@@ -365,7 +377,7 @@
       map = new maplibregl.Map({
         container,
         style: baseStyle(),
-        center: [place.lon, place.lat - 8],
+        center: [place.lon, place.lat - 12],
         zoom: 1,
         maxZoom: 17,
         attributionControl: false,
@@ -379,6 +391,7 @@
       // Open on the whole Earth, floating on the page, turning slowly; it fades and grows in.
       map.once("load", () => {
         map.resize();
+        fitPadding();
         map.jumpTo({ zoom: globeZoom() });
         requestAnimationFrame(() => container.classList.remove("intro"));
         startSpin();
@@ -389,8 +402,10 @@
       const near = () => {
         container.classList.toggle("globe", atGlobe());
         const r = atGlobe() ? globeRadius() : 4000;
+        const o = map.project(map.getCenter());
         panel.style.setProperty("--gr", r.toFixed(1) + "px");
-        panel.style.setProperty("--mh", container.clientHeight + "px");
+        panel.style.setProperty("--gx", o.x.toFixed(1) + "px");
+        panel.style.setProperty("--gy", o.y.toFixed(1) + "px");
       };
       map.on("move", near);
       map.on("zoom", near);
@@ -424,7 +439,7 @@
     placeMarker.getElement().onclick = () => { if (atGlobe()) toPlace(); };
     placeMarker.getElement().setAttribute("aria-label", "Zoom in to stations near you");
     if (map.loaded()) addStations(stations); else map.once("load", () => addStations(stations));
-    setTimeout(() => map.resize(), 50);
+    setTimeout(() => { map.resize(); fitPadding(); }, 50);
   }
 
   function reset() {
@@ -433,5 +448,12 @@
     lastFetch = null;
   }
 
-  window.StationMap = { show, reset, tempColor };
+  // The sky bar or the screen changed size: keep the globe in the open space, and the right size.
+  function refit() {
+    if (!map || !map.loaded()) return;
+    fitPadding();
+    if (atGlobe() && !map.isMoving()) map.jumpTo({ zoom: globeZoom() });
+  }
+
+  window.StationMap = { show, reset, refit, tempColor };
 })();
