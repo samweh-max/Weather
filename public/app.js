@@ -479,10 +479,11 @@ function renderHero(date, c) {
   const headline = c.wet > c.n / 2 && c.code !== "drizzle" ? `${WORDS[c.code]} likely` : WORDS[c.code];
   const spreadDeg = fmt.tempDiff(c.hiMax - c.hiMin);
   const rainSplit = c.n >= 3 && c.wet / c.n > 0.25 && c.wet / c.n < 0.75;
+  const hiRange = `highs ${fmt.temp(c.hiMin).replace("°", "")}–${fmt.temp(c.hiMax)}`;
   const agree = c.n < 2 ? ["–", "one source"]
-    : spreadDeg <= 2 && !rainSplit ? ["Strong", `highs within ${Math.max(spreadDeg, 1)}°`]
-    : spreadDeg <= 4 ? ["Mixed", rainSplit ? "split on rain" : `highs vary ${spreadDeg}°`]
-    : ["Low", `highs vary ${spreadDeg}°`];
+    : spreadDeg <= 2 && !rainSplit ? ["Strong", hiRange]
+    : spreadDeg <= 4 ? ["Mixed", rainSplit ? "split on rain" : hiRange]
+    : ["Low", hiRange];
   const rainVal = c.wet === 0 ? "Dry" : `${c.wet} of ${c.n}`;
   const rainSub = c.wet === 0 ? "every source" : "sources say rain";
   const windVal = c.wind != null ? `${windArrow(c.dir, "")}<span>${fmt.windNum(c.wind)} <small style="font-size:12px;font-weight:500">${fmt.windUnit()}</small></span>` : "–";
@@ -500,9 +501,9 @@ function renderHero(date, c) {
       <div class="cond-sub">Low ${fmt.temp(c.lo)} · typical of ${c.n} source${c.n === 1 ? "" : "s"} · ${windWord(c.wind).toLowerCase() || "wind unknown"}</div>
     </div>
     <div class="stats">
-      <div class="stat"><div class="k">Rain</div><div class="v">${rainVal}</div><div class="s">${rainSub}</div></div>
-      <div class="stat"><div class="k">Wind</div><div class="v">${windVal}</div><div class="s">${windSub || "&nbsp;"}</div></div>
-      <div class="stat"><div class="k">Agreement</div><div class="v">${agree[0]}</div><div class="s">${agree[1]}</div></div>
+      <div class="stat" ${tip(TIPS.rainCount)}><div class="k">Rain</div><div class="v">${rainVal}</div><div class="s">${rainSub}</div></div>
+      <div class="stat" ${tip(TIPS.wind)}><div class="k">Wind</div><div class="v">${windVal}</div><div class="s">${windSub || "&nbsp;"}</div></div>
+      <div class="stat" ${tip(TIPS.agree())}><div class="k">Agreement</div><div class="v">${agree[0]}</div><div class="s">${agree[1]}</div></div>
     </div>
     ${sunBar(date)}`;
 }
@@ -1117,10 +1118,35 @@ function dayName(date) {
   return new Date(date + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", timeZone: "UTC" });
 }
 
+// Short explanations shown when a header box is tapped.
+const TIPS = {
+  rainCount: "How many forecasts expect rain today.",
+  rainChance: "Blended chance of rain today, and roughly how much.",
+  wind: "Typical wind across the forecasts, with the strongest gust.",
+  agree: () => `How close the forecasts are on today's high temperature and on rain. Strong: highs within ${fmt.tempDiff(2)}°. Mixed: within ${fmt.tempDiff(4)}° or split on rain. Low: further apart.`,
+  confidence: () => `How closely the sources back this forecast's high temperature and rain. High: within ${fmt.tempDiff(1)}°. Medium: within ${fmt.tempDiff(2)}°. Low: further apart or split on rain.`,
+};
+const tip = (text) => `role="button" tabindex="0" data-tip="${esc(text)}"`;
+function showTip(stat) {
+  const hero = $("#hero");
+  const open = hero.querySelector(".stat-tip");
+  const same = open && open.dataset.for === stat.dataset.tip;
+  if (open) open.remove();
+  hero.querySelectorAll(".stat.on").forEach((s) => s.classList.remove("on"));
+  if (same) return;
+  stat.classList.add("on");
+  const t = document.createElement("p");
+  t.className = "stat-tip";
+  t.dataset.for = stat.dataset.tip;
+  t.textContent = stat.dataset.tip;
+  stat.parentElement.after(t);
+}
+
 function heroForecast(pred) {
   const d = pred.days[0];
   const h0 = pred.hours[0];
-  const conf = { high: ["High", "sources agree"], medium: ["Medium", "partly agree"], low: ["Low", "sources differ"] }[d.confidence];
+  const conf = [{ high: "High", medium: "Medium", low: "Low" }[d.confidence],
+    d.n < 2 ? "one source" : d.split ? "split on rain" : `highs ${fmt.temp(d.hiMin).replace("°", "")}–${fmt.temp(d.hiMax)}`];
   const headline = (d.pop ?? 0) >= 50 && d.code !== "drizzle" ? `${WORDS[d.code]} likely` : WORDS[d.code];
   return {
     code: d.code, wind: d.wind, dir: d.dir,
@@ -1130,9 +1156,9 @@ function heroForecast(pred) {
     <div class="cond"><div class="cond-word">${headline}</div>
       <div class="cond-sub">Low ${fmt.temp(d.lo)}${h0 ? ` · now ${fmt.temp(h0.temp)}` : ""} · blended from ${pred.weights.length} sources</div></div>
     <div class="stats">
-      <div class="stat"><div class="k">Rain</div><div class="v">${d.pop != null ? Math.round(d.pop) + "%" : "–"}</div><div class="s">${d.mm ? "about " + fmt.rain(d.mm) : "chance today"}</div></div>
-      <div class="stat"><div class="k">Wind</div><div class="v">${windArrow(d.dir, "")}<span>${fmt.windNum(d.wind)} <small style="font-size:12px;font-weight:500">${fmt.windUnit()}</small></span></div><div class="s">${[compass(d.dir), d.gust != null ? "gusts " + fmt.windNum(d.gust) : null].filter(Boolean).join(" · ")}</div></div>
-      <div class="stat"><div class="k">Confidence</div><div class="v">${conf[0]}</div><div class="s">${conf[1]}</div></div>
+      <div class="stat" ${tip(TIPS.rainChance)}><div class="k">Rain</div><div class="v">${d.pop != null ? Math.round(d.pop) + "%" : "–"}</div><div class="s">${d.mm ? "about " + fmt.rain(d.mm) : "chance today"}</div></div>
+      <div class="stat" ${tip(TIPS.wind)}><div class="k">Wind</div><div class="v">${windArrow(d.dir, "")}<span>${fmt.windNum(d.wind)} <small style="font-size:12px;font-weight:500">${fmt.windUnit()}</small></span></div><div class="s">${[compass(d.dir), d.gust != null ? "gusts " + fmt.windNum(d.gust) : null].filter(Boolean).join(" · ")}</div></div>
+      <div class="stat" ${tip(TIPS.confidence())}><div class="k">Confidence</div><div class="v">${conf[0]}</div><div class="s">${conf[1]}</div></div>
     </div>`,
   };
 }
@@ -1697,6 +1723,17 @@ function demoProvider(p) {
 
 function init() {
   $("#placeBtn").onclick = openPlaceSheet;
+  // Tap a header box to see what it means; tap it again (or anywhere else) to hide it.
+  document.addEventListener("click", (e) => {
+    const stat = e.target.closest("#hero .stat[data-tip]");
+    if (stat) return showTip(stat);
+    const open = $("#hero .stat-tip");
+    if (open && !e.target.closest(".stat-tip")) { open.remove(); $("#hero .stat.on")?.classList.remove("on"); }
+  });
+  $("#hero").addEventListener("keydown", (e) => {
+    const stat = e.target.closest(".stat[data-tip]");
+    if (stat && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); showTip(stat); }
+  });
   $("#settingsBtn").onclick = openSettings;
   $("#refreshBtn").onclick = () => refresh();
   $("#gpsBtn").onclick = useGps;
