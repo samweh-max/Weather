@@ -613,8 +613,7 @@ h2 + button.srow { border-top: 0; }
 /* ---------- Stations: the globe page ----------
    The globe fills the screen behind everything. The slim sky bar floats on top, and the
    station cards sit on a sheet that starts low on the screen and scrolls up over the globe.
-   --sky-h (sky bar height), --sheet-top, --gx/--gy (globe centre) and --gr (globe radius)
-   are set from the script. */
+   --sky-h (sky bar height) and --sheet-top are set from the script. */
 .globe-layer {
   position: fixed; inset: 0; z-index: 0; overflow: hidden;
   background: radial-gradient(120% 80% at 50% 32%, #f3f7fb 0%, #dfe8f1 60%, #d3dee9 100%);
@@ -639,12 +638,16 @@ h2 + button.srow { border-top: 0; }
 .sky { z-index: 2; }
 body.on-globe #main { position: relative; z-index: 1; pointer-events: none; padding-top: 0; }
 body.on-globe #footer { display: none; }
+/* The sheet runs right to the bottom of the screen, under the tab bar. */
+body.on-globe { padding-bottom: 0; }
+body.on-globe #main { padding-bottom: 0; }
 #pageStations { padding-top: calc(var(--sheet-top, 60vh) - var(--sky-h, 100px)); }
 .st-sheet {
   pointer-events: auto; position: relative;
   margin: 0 calc(-1 * max(16px, env(safe-area-inset-left, 0px)));
-  padding: 8px max(16px, env(safe-area-inset-left, 0px)) 24px;
+  padding: 8px max(16px, env(safe-area-inset-left, 0px)) calc(110px + env(safe-area-inset-bottom, 0px));
   min-height: calc(100vh - var(--sheet-top, 60vh));
+  min-height: calc(100lvh - var(--sheet-top, 60vh));
   border-radius: 26px 26px 0 0;
   background: color-mix(in srgb, var(--bg) 86%, transparent);
   backdrop-filter: blur(22px) saturate(1.3); -webkit-backdrop-filter: blur(22px) saturate(1.3);
@@ -670,11 +673,10 @@ body.on-globe #footer { display: none; }
 .map.globe .mk-me { cursor: pointer; }
 .map.globe .maplibregl-ctrl-group { opacity: 0; pointer-events: none; }
 
-/* A soft atmosphere around the globe and gentle shading that makes it read as a ball. */
-.globe-fx, .globe-shade { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .6s ease-out; }
-.globe-fx { background: radial-gradient(circle at var(--gx, 50%) var(--gy, 40%), transparent calc(var(--gr, 150px) - 2px), color-mix(in srgb, var(--rain) 42%, transparent) var(--gr, 150px), color-mix(in srgb, var(--rain) 12%, transparent) calc(var(--gr, 150px) + 14px), transparent calc(var(--gr, 150px) + 60px)); }
-.globe-shade { z-index: 1; background: radial-gradient(circle at var(--gx, 50%) var(--gy, 40%), transparent calc(var(--gr, 150px) * .55), rgba(5, 15, 35, .22) calc(var(--gr, 150px) - 1px), transparent var(--gr, 150px)); }
-.globe-layer:has(.map.globe:not(.intro)) .globe-fx, .globe-layer:has(.map.globe:not(.intro)) .globe-shade { opacity: 1; }
+/* A soft blue atmosphere around the globe. It is a glow on the map's own picture, so it always
+   hugs the globe exactly. Only while zoomed out, where the globe has space around it. */
+.map .maplibregl-canvas { transition: filter .5s ease-out; }
+.map.globe:not(.intro) .maplibregl-canvas { filter: drop-shadow(0 0 2px rgba(150, 200, 255, 0.9)) drop-shadow(0 0 22px color-mix(in srgb, var(--rain) 60%, transparent)); }
 
 /* Going to Stations: the page drops away and the cards rise as a sheet over the globe, which grows in.
    Leaving: the sheet slides down and the globe recedes. */

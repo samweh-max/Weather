@@ -81,7 +81,7 @@
 
   // Light the globe from the viewer's side, so the atmosphere is an even glow all round.
   const LIGHT = { anchor: "viewport", position: [1.5, 180, 0] };
-  // (The soft glow around the globe and its shading are drawn by the page, see .globe-fx.)
+  // (The soft glow around the globe is a drop shadow on the map's canvas, see .map.globe in the styles.)
 
   function baseStyle() {
     const sources = {}, layers = [{ id: "bg", type: "background", paint: { "background-color": dark() ? "#16202b" : "#dfe7ee" } }];
@@ -402,16 +402,7 @@
         startSpin();
       });
       ["mousedown", "touchstart", "wheel"].forEach((ev) => container.addEventListener(ev, stopSpin, { passive: true }));
-      // Size the glow around the globe and the shading on it to match the globe on screen.
-      const panel = container.parentElement;
-      const near = () => {
-        container.classList.toggle("globe", atGlobe());
-        const r = atGlobe() ? globeRadius() : 4000;
-        const o = map.project(map.getCenter());
-        panel.style.setProperty("--gr", r.toFixed(1) + "px");
-        panel.style.setProperty("--gx", o.x.toFixed(1) + "px");
-        panel.style.setProperty("--gy", o.y.toFixed(1) + "px");
-      };
+      const near = () => container.classList.toggle("globe", atGlobe());
       map.on("move", near);
       map.on("zoom", near);
       near();
