@@ -19,6 +19,7 @@
   let cartoKey = null;
   let style = "map";
   let ready = false; // the map has finished its first load
+  let building = false, pending = null;
 
   function loadLib() {
     if (window.maplibregl) return Promise.resolve();
@@ -56,12 +57,10 @@
     return ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"];
   }
 
-  // OpenStreetMap's tiles are bright and busy; calm them to sit with the app, and dim them at night.
+  // OpenStreetMap's own tiles (only used if the vector map can't load): calm the colours a little.
   function streetPaint() {
     if (cartoKey) return { "raster-fade-duration": 150 };
-    return dark()
-      ? { "raster-saturation": -0.6, "raster-brightness-max": 0.62, "raster-contrast": -0.1, "raster-fade-duration": 150 }
-      : { "raster-saturation": -0.45, "raster-contrast": -0.05, "raster-fade-duration": 150 };
+    return { "raster-saturation": -0.3, "raster-fade-duration": 150 };
   }
 
   const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>';
@@ -83,42 +82,97 @@
   const LIGHT = { anchor: "viewport", position: [1.5, 180, 0] };
   // (The soft glow around the globe is a drop shadow on the map's canvas, see .map.globe in the styles.)
 
-  function baseStyle() {
-    const sources = {}, layers = [{ id: "bg", type: "background", paint: { "background-color": dark() ? "#16202b" : "#dfe7ee" } }];
-    if (window.DEMO_LAND) {
-      // Preview only: an outline of the land instead of map tiles, which the preview can't load.
-      sources.land = { type: "geojson", data: window.DEMO_LAND, attribution: "Coastlines: Natural Earth" };
-      layers[0].paint["background-color"] = dark() ? "#1d3446" : "#bcd6e8";
-      layers.push({ id: "land", type: "fill", source: "land", paint: { "fill-color": dark() ? "#233140" : "#f4f6f8", "fill-outline-color": dark() ? "#3b4b5b" : "#9fb2c2" } });
-    } else {
-      sources.street = { type: "raster", tiles: streetTiles(), tileSize: cartoKey ? 512 : 256, maxzoom: 19, attribution: cartoKey ? OSM + " " + CARTO : OSM };
-      sources.sat = { type: "raster", tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19, attribution: ESRI };
-      sources.satLabels = { type: "raster", tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19 };
-      layers.push(
-        { id: "street", type: "raster", source: "street", paint: streetPaint(), layout: { visibility: style === "map" ? "visible" : "none" } },
-        { id: "sat", type: "raster", source: "sat", paint: { "raster-fade-duration": 150 }, layout: { visibility: style === "sat" ? "visible" : "none" } },
-        { id: "satLabels", type: "raster", source: "satLabels", paint: { "raster-fade-duration": 150 }, layout: { visibility: style === "sat" ? "visible" : "none" } },
-      );
+  // The street map and all place and road names are vector tiles from OpenFreeMap (free, no key,
+  // OpenStreetMap data). Vector text is drawn by the phone, so it stays sharp at every zoom.
+  // Satellite is Esri imagery underneath the same names. If the vector map can't load, fall back
+  // to picture tiles.
+  const VECTOR_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+  const SAT_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+  let vector = null; // { base: [layer ids], labels: [{ id, paint }] } when the vector map is in use
+
+  async function baseStyle() {
+    if (window.DEMO_LAND) return demoStyle();
+    try {
+      const st = await fetch(VECTOR_STYLE).then((r) => { if (!r.ok) throw new Error(); return r.json(); });
+      const sat = style === "sat";
+      st.sources.sat = { type: "raster", tiles: [SAT_TILES], tileSize: 256, maxzoom: 19, attribution: ESRI };
+      const at = Math.max(1, st.layers.findIndex((l) => l.type !== "background"));
+      st.layers.splice(at, 0, { id: "sat", type: "raster", source: "sat", paint: { "raster-fade-duration": 150 }, layout: { visibility: sat ? "visible" : "none" } });
+      vector = { base: [], labels: [] };
+      for (const l of st.layers) {
+        if (l.id === "sat") continue;
+        if (l.type === "symbol") {
+          l.paint = l.paint || {};
+          vector.labels.push({ id: l.id, paint: { "text-color": l.paint["text-color"], "text-halo-color": l.paint["text-halo-color"], "text-halo-width": l.paint["text-halo-width"] } });
+        } else {
+          vector.base.push(l.id);
+          if (sat) (l.layout ||= {}).visibility = "none";
+        }
+      }
+      Object.assign(st, { projection: { type: "globe" }, sky: SKY, light: LIGHT });
+      return st;
+    } catch {
+      vector = null;
+      return rasterStyle();
     }
+  }
+
+  function demoStyle() {
+    // Preview only: an outline of the land instead of map tiles, which the preview can't load.
+    return {
+      version: 8, projection: { type: "globe" }, sky: SKY, light: LIGHT,
+      sources: { land: { type: "geojson", data: window.DEMO_LAND, attribution: "Coastlines: Natural Earth" } },
+      layers: [
+        { id: "bg", type: "background", paint: { "background-color": dark() ? "#1d3446" : "#bcd6e8" } },
+        { id: "land", type: "fill", source: "land", paint: { "fill-color": dark() ? "#233140" : "#f4f6f8", "fill-outline-color": dark() ? "#3b4b5b" : "#9fb2c2" } },
+      ],
+    };
+  }
+
+  function rasterStyle() {
+    const sources = {
+      street: { type: "raster", tiles: streetTiles(), tileSize: cartoKey ? 512 : 256, maxzoom: 19, attribution: cartoKey ? OSM + " " + CARTO : OSM },
+      sat: { type: "raster", tiles: [SAT_TILES], tileSize: 256, maxzoom: 19, attribution: ESRI },
+      satLabels: { type: "raster", tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19 },
+    };
+    const layers = [
+      { id: "bg", type: "background", paint: { "background-color": "#dfe7ee" } },
+      { id: "street", type: "raster", source: "street", paint: streetPaint(), layout: { visibility: style === "map" ? "visible" : "none" } },
+      { id: "sat", type: "raster", source: "sat", paint: { "raster-fade-duration": 150 }, layout: { visibility: style === "sat" ? "visible" : "none" } },
+      { id: "satLabels", type: "raster", source: "satLabels", paint: { "raster-fade-duration": 150 }, layout: { visibility: style === "sat" ? "visible" : "none" } },
+    ];
     return { version: 8, projection: { type: "globe" }, sky: SKY, light: LIGHT, sources, layers };
   }
+
+  // Names on satellite: white with a dark outline so they read on any imagery.
+  const SAT_TEXT = { "text-color": "#ffffff", "text-halo-color": "rgba(0, 0, 0, 0.75)", "text-halo-width": 1.4 };
 
   function setStyle(s) {
     style = s;
     saveStyle(s);
     document.querySelectorAll("#mapStyle button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.style === s)));
-    if (!map || window.DEMO_LAND) return;
-    map.setLayoutProperty("street", "visibility", s === "map" ? "visible" : "none");
-    map.setLayoutProperty("sat", "visibility", s === "sat" ? "visible" : "none");
-    map.setLayoutProperty("satLabels", "visibility", s === "sat" ? "visible" : "none");
-    map.getContainer().classList.toggle("sat", s === "sat");
+    if (!map || window.DEMO_LAND || !ready) return;
+    const sat = s === "sat";
+    const vis = (id, on) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
+    vis("sat", sat);
+    if (vector) {
+      vector.base.forEach((id) => vis(id, !sat));
+      for (const l of vector.labels) {
+        if (!map.getLayer(l.id)) continue;
+        for (const k of Object.keys(SAT_TEXT)) {
+          try { map.setPaintProperty(l.id, k, sat ? SAT_TEXT[k] : l.paint[k]); } catch {}
+        }
+      }
+    } else {
+      vis("street", !sat);
+      vis("satLabels", sat);
+    }
+    map.getContainer().classList.toggle("sat", sat);
   }
 
   function themeChanged() {
-    if (!map || window.DEMO_LAND || !map.getSource("street")) return;
+    if (!map || window.DEMO_LAND || vector || !map.getSource("street")) return;
     map.getSource("street").setTiles(streetTiles());
-    for (const [k, v] of Object.entries(streetPaint())) map.setPaintProperty("street", k, v);
-    map.setPaintProperty("bg", "background-color", dark() ? "#16202b" : "#dfe7ee");
   }
 
   // The globe's radius on screen. Walk east from the centre along a great circle: the point that
@@ -365,7 +419,10 @@
       container.innerHTML = `<div class="map-msg">The map couldn't load. Check your connection and try again.</div>`;
       return;
     }
+    // Building the map waits for its style; calls that arrive meanwhile are replayed after.
+    if (building) { pending = [container, place, stations, options]; return; }
     if (!map || map.getContainer() !== container) {
+      building = true;
       if (map) map.remove();
       seen.clear();
       radar = null;
@@ -379,7 +436,7 @@
       container.classList.add("intro");
       map = new maplibregl.Map({
         container,
-        style: baseStyle(),
+        style: await baseStyle().finally(() => { building = false; }),
         center: [place.lon, place.lat - 12],
         zoom: 1,
         maxZoom: 17,
@@ -395,6 +452,7 @@
       ready = false;
       map.once("load", () => {
         ready = true;
+        setStyle(style);
         map.resize();
         fitPadding();
         map.jumpTo({ zoom: globeZoom() });
@@ -436,6 +494,7 @@
     placeMarker.getElement().setAttribute("aria-label", "Zoom in to stations near you");
     if (ready) addStations(stations); else map.once("load", () => addStations(stations));
     // Resizing clears the canvas for a frame, so only do it when the size really changed.
+    if (pending) { const args = pending; pending = null; return show(...args); }
     setTimeout(() => {
       const c = map.getCanvas(), box = map.getContainer();
       if (Math.abs(c.clientWidth - box.clientWidth) > 1 || Math.abs(c.clientHeight - box.clientHeight) > 1) map.resize();
