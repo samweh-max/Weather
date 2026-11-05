@@ -297,6 +297,23 @@
       <table>${rows.map(([k, v]) => `<tr><td>${k}</td><td>${opts.esc(v)}</td></tr>`).join("")}</table>${s.hourly && opts.timeline ? opts.timeline(s.hourly) : ""}</div>`;
   }
 
+  // Nudge the map so an opened station card isn't hidden under the sky bar or the sheet.
+  function keepInView(pop) {
+    requestAnimationFrame(() => {
+      const el = pop.getElement();
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const bar = document.querySelector(".map-bar");
+      const top = (bar ? bar.getBoundingClientRect().bottom : 0) + 8;
+      const sheet = document.querySelector(".st-sheet");
+      const bottom = (sheet ? sheet.getBoundingClientRect().top : innerHeight) - 8;
+      let dy = 0;
+      if (r.top < top) dy = r.top - top;
+      else if (r.bottom > bottom) dy = Math.min(r.bottom - bottom, r.top - top);
+      if (dy) map.panBy([0, dy], { duration: 300 });
+    });
+  }
+
   function addStations(list) {
     for (const s of list || []) {
       if (s.lat == null || s.lon == null) continue;
@@ -308,6 +325,7 @@
       node.style.zIndex = s.temp != null ? "2" : "1";
       const pop = new maplibregl.Popup({ closeButton: false, offset: 14, maxWidth: "280px", className: "st-pop" }).setHTML(popupFor(s));
       const m = new maplibregl.Marker({ element: node, anchor: "center" }).setLngLat([s.lon, s.lat]).setPopup(pop).addTo(map);
+      pop.on("open", () => keepInView(pop));
       s._m = m;
       seen.set(s.id, s);
     }

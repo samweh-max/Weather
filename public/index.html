@@ -68,9 +68,11 @@
       <div class="compare-head">
         <h2>Compare sources</h2>
         <div id="modes" class="modes" role="tablist" aria-label="What to compare">
-          <button role="tab" data-mode="temp">Temp</button>
-          <button role="tab" data-mode="rain">Rain</button>
-          <button role="tab" data-mode="wind">Wind</button>
+          <span class="mode-blob" aria-hidden="true"></span>
+          <button role="tab" data-mode="all">All</button>
+          <button role="tab" data-mode="temp" aria-label="Temperature" title="Temperature"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13.5V5a2 2 0 1 1 4 0v8.5a4 4 0 1 1-4 0z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="17" r="1.8" fill="currentColor"/></svg></button>
+          <button role="tab" data-mode="rain" aria-label="Rain" title="Rain"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5s-6 6.6-6 10.7a6 6 0 0 0 12 0C18 10.1 12 3.5 12 3.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></button>
+          <button role="tab" data-mode="wind" aria-label="Wind" title="Wind"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
         </div>
       </div>
       <section id="list" class="list"></section>
