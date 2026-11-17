@@ -1,7 +1,7 @@
 // Home station on CampbellON, run against sample responses (no network needed).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { homeStation, homeNear, homeHistory, kindOf, pickSensors, convert, bucket } from "../worker/home.js";
+import { homeStation, homeNear, homeHistory, kindOf, pickSensors, convert, bucket, guessUnit } from "../worker/home.js";
 import { stationsNear } from "../worker/stations.js";
 import worker from "../worker/index.js";
 
@@ -181,4 +181,15 @@ test("/api/home endpoint: off without a login, on with one", async () => {
 test("bucket: wind direction averages round the compass", () => {
   const b = bucket([{ t: 0, v: 350 }, { t: 1, v: 10 }], HOUR, 0, true);
   assert.ok(b[0].avg < 1 || b[0].avg > 359);
+});
+
+test("fills in units the logger left out, but not for probe internals", () => {
+  assert.equal(guessUnit("AirTC_Avg"), "Deg C");
+  assert.equal(guessUnit("T_Avg"), "Deg C");
+  assert.equal(guessUnit("WS_ms_S_WVT"), "meters/second");
+  assert.equal(guessUnit("VWC_Avg"), "m^3/m^3");
+  assert.equal(guessUnit("P_Avg"), "");
+  assert.equal(guessUnit("PA_Avg"), "");
+  assert.equal(guessUnit("WSDiag"), "");
+  assert.equal(kindOf("T_Avg", "Deg C"), null);
 });

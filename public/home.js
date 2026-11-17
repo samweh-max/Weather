@@ -109,20 +109,47 @@ const STAT_WORDS = [[/_?(avg|mean|wvt|_s_)/i, "average"], [/_?(max|tmx)/i, "high
 
 function tableWords(t) {
   if (!t) return "";
-  const m = /(\d+)\s*(m|min)?$/i.exec(t);
+  const m = /(\d+)\s*_?(m|mins?|minutes?)?$/i.exec(t);
   if (/day|daily|24/i.test(t)) return "daily";
   if (/hour|60/i.test(t)) return "hourly";
   if (m && +m[1] > 0 && +m[1] < 60) return `every ${+m[1]} min`;
   return t.replace(/_/g, " ").toLowerCase();
 }
 
+// Campbell soil probes (CS650/CS655) log water content, saltiness and their own temperature
+// under short names: T_Avg there is the soil, not the air.
+const SOIL_WORDS = [
+  [/^t(_|$)/i, "Soil temperature"],
+  [/^ec(_|$)/i, "Soil saltiness (conductivity)"],
+  [/^p(_|$)/i, "Soil permittivity"],
+  [/^pa(_|$)/i, "Soil probe signal time"],
+  [/^vr(_|$)/i, "Soil probe signal ratio"],
+];
+const EXTRA_WORDS = [
+  [/diag/i, "Wind sensor health"],
+  [/^record$/i, "Record number"],
+];
+const hasSoilProbe = (all) => (all || []).some((x) => /vwc/i.test(x.field || ""));
+function sensorWords(f, all) {
+  const soil = hasSoilProbe(all) && SOIL_WORDS.find(([re]) => re.test(f));
+  return soil || EXTRA_WORDS.find(([re]) => re.test(f)) || SENSOR_WORDS.find(([re]) => re.test(f));
+}
+
 function sensorName(r, all) {
   const f = r.field || "";
-  const hit = SENSOR_WORDS.find(([re]) => re.test(f));
+  const name = sensorBase(r, all);
+  // Two different sensors that still read the same: name the logger field so they can't be mixed up.
+  const same = (all || []).some((x) => x !== r && x.field !== f && x.table === r.table && sensorBase(x, all) === name);
+  return same ? `${name} · ${f}` : name;
+}
+
+function sensorBase(r, all) {
+  const f = r.field || "";
+  const hit = sensorWords(f, all);
   let name = hit ? hit[1] : f.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\s+/g, " ").trim();
   const stat = STAT_WORDS.find(([re]) => re.test(f.replace(/^[^_]+/, "")));
   // Leave out "average" on the common case; say it where it tells two sensors apart.
-  const twins = (all || []).filter((x) => x !== r && SENSOR_WORDS.find(([re]) => re.test(x.field || "")) === hit && hit);
+  const twins = (all || []).filter((x) => x !== r && hit && sensorWords(x.field || "", all) === hit);
   const plain = (stat && stat[1] === "average" && (r.main || !twins.length)) || (stat && stat[1] === "total" && hit && hit[1] === "Rain" && r.main);
   if (stat && !plain && !(hit && /gust/i.test(hit[1]))) name += `, ${stat[1]}`;
   if (twins.some((x) => x.field === r.field && x.table !== r.table)) name += ` (${tableWords(r.table)})`;
@@ -146,6 +173,7 @@ function sensorValue(r) {
     case "pressure": return Math.round(std) + " hPa";
   }
   if (/^(deg\s*c|°c|degc|c)$/i.test(u)) return fmt.temp(v);
+  if (/^m\^?3\/m\^?3$/i.test(u)) return `${Math.round(v * 1000) / 10}%`;
   const nice = UNIT_WORDS[u.toLowerCase()] ?? u;
   const n = Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10;
   return `${n.toLocaleString()}${nice ? (nice === "%" || nice === "°" || nice === "°C" ? "" : " ") + nice : ""}`;

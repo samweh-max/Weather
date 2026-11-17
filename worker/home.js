@@ -85,7 +85,7 @@ async function readHome(api, env) {
   const readings = Object.entries(latest?.data || {})
     .map(([id, r]) => {
       const d = list.find((x) => x.id === id);
-      return { id, field: r.field_name || d?.metadata?.field || "", table: r.table_name || d?.metadata?.table || "", unit: r.unit || "", ts: r.ts, value: r.value, interval: d?.metadata?.interval };
+      return { id, field: r.field_name || d?.metadata?.field || "", table: r.table_name || d?.metadata?.table || "", unit: r.unit || d?.metadata?.unit || d?.metadata?.units || guessUnit(r.field_name || d?.metadata?.field || ""), ts: r.ts, value: r.value, interval: d?.metadata?.interval };
     })
     .filter((r) => r.field);
 
@@ -258,6 +258,26 @@ const KINDS = {
   pressure: { re: /(^bp|baro|press|^mslp|^p_?(hpa|mbar))/i, unit: /(hpa|mbar|mb|kpa|inhg|pa)$/i },
 };
 const SKIP = /(^ptemp|panel|batt|volt|soil|water|leaf|surf|snow|road|_std|stdev|_min$|_tmn|^min|dewp|dew_?pt|wetbulb|heat|chill|ytd|accum|cum|daily|_day|24h|_rate|intens|sigma|sd_|_sd)/i;
+
+// Some loggers send values without units. Fill in the usual Campbell ones from the field name,
+// so readings aren't shown as bare numbers.
+const GUESS = [
+  [/^(airtc|airtemp|air_?temp|ptemp|paneltemp|t107|t109|soil_?t|t_?soil)|^t(_avg|_c)?$|temp_?c/i, "Deg C"],
+  [/^rh|humid/i, "%"],
+  [/^ws|wind.?sp/i, "meters/second"],
+  [/wind.?dir|^wd/i, "degrees"],
+  [/rain|precip/i, "mm"],
+  [/^bp|baro/i, "mbar"],
+  [/^batt|battery|volt/i, "Volts"],
+  [/vwc/i, "m^3/m^3"],
+  [/^ec(_|$)/i, "dS/m"],
+  [/^slr.*w|^sw_?in|solar.*w/i, "W/m^2"],
+];
+export function guessUnit(field) {
+  if (/diag|record|^pa(_|$)|^vr(_|$)|^p(_avg)?$/i.test(field)) return "";
+  const hit = GUESS.find(([re]) => re.test(field));
+  return hit ? hit[1] : "";
+}
 
 export function kindOf(field, unit) {
   if (SKIP.test(field)) return null;
