@@ -137,7 +137,8 @@ svg { display: block; }
 .sky-actions { display: flex; gap: 6px; }
 .sky-btn {
   width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
-  background: rgba(255, 255, 255, 0.16); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  /* No backdrop blur over the moving sky: the phone would have to re-blur it every frame. */
+  background: rgba(255, 255, 255, 0.19);
 }
 .sky-btn:active { background: rgba(255, 255, 255, 0.3); }
 .spin svg { animation: spin 0.9s linear infinite; }
@@ -160,7 +161,7 @@ svg { display: block; }
 .hero .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
 .stat {
   border-radius: var(--r-md); padding: 10px 11px; min-width: 0;
-  background: rgba(255, 255, 255, 0.14); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.17);
   border: 1px solid rgba(255, 255, 255, 0.16);
 }
 .stat .k { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.82; }
@@ -172,7 +173,7 @@ svg { display: block; }
 .stat-tip {
   margin: 8px 0 0; padding: 10px 12px; border-radius: var(--r-md);
   font-size: 13px; line-height: 1.4; text-wrap: pretty;
-  background: rgba(8, 16, 28, 0.32); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  background: rgba(8, 16, 28, 0.38);
   animation: tip-in 0.22s cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 @keyframes tip-in { from { opacity: 0; transform: translateY(-4px); } }

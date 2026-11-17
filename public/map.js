@@ -22,7 +22,7 @@
   let building = false, pending = null;
 
   function loadLib() {
-    if (window.maplibregl) return Promise.resolve();
+    if (window.maplibregl) { rtl(); return Promise.resolve(); }
     if (loading) return loading;
     loading = new Promise((resolve, reject) => {
       if (!window.MAP_CSS_INLINED) {
@@ -33,11 +33,23 @@
       }
       const js = document.createElement("script");
       js.src = LIB_JS;
-      js.onload = () => resolve();
+      js.onload = () => { rtl(); resolve(); };
       js.onerror = () => { loading = null; reject(new Error("Map library didn't load")); };
       document.head.append(js);
     });
     return loading;
+  }
+
+  // Arabic, Hebrew and similar scripts need to be joined up and drawn right to left; MapLibre
+  // leaves that to a small add-on, fetched only when such a name is first on screen.
+  const RTL = "https://unpkg.com/@mapbox/mapbox-gl-rtl-text@0.3.0/dist/mapbox-gl-rtl-text.js";
+  function rtl() {
+    try {
+      const gl = window.maplibregl;
+      if (!gl || !gl.setRTLTextPlugin || (gl.getRTLTextPluginStatus && gl.getRTLTextPluginStatus() !== "unavailable")) return;
+      const p = gl.setRTLTextPlugin(RTL, true);
+      if (p && p.catch) p.catch(() => {});
+    } catch {}
   }
 
   const dark = () =>

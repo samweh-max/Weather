@@ -33,18 +33,25 @@
 
   // Value of `field` at time t from a source's hourly list; temps and wind are interpolated
   // between 3- or 6-hourly points, other fields use the slot that covers t.
+  // Each source's times, parsed once (the blend asks for thousands of values per run).
+  const timesOf = new WeakMap();
+  function times(hours) {
+    let ts = timesOf.get(hours);
+    if (!ts || ts.length !== hours.length) { ts = Float64Array.from(hours, (h) => ms(h.time)); timesOf.set(hours, ts); }
+    return ts;
+  }
   function at(hours, t, field) {
-    let prev = null, next = null;
-    for (const h of hours) {
-      const ht = ms(h.time);
-      if (ht <= t) prev = h; else { next = h; break; }
-    }
-    if (!prev) return null;
-    const pt = ms(prev.time);
+    const ts = times(hours);
+    // The last slot at or before t, by binary search.
+    let lo = 0, hi = ts.length - 1, i = -1;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (ts[mid] <= t) { i = mid; lo = mid + 1; } else hi = mid - 1; }
+    if (i < 0) return null;
+    const prev = hours[i], next = hours[i + 1] || null;
+    const pt = ts[i];
     if (pt === t) return prev[field];
-    if (!next || ms(next.time) - pt > 6 * HOUR) return t - pt <= HOUR ? prev[field] : null;
+    if (!next || ts[i + 1] - pt > 6 * HOUR) return t - pt <= HOUR ? prev[field] : null;
     if ((field === "temp" || field === "wind" || field === "gust") && prev[field] != null && next[field] != null) {
-      const f = (t - pt) / (ms(next.time) - pt);
+      const f = (t - pt) / (ts[i + 1] - pt);
       return prev[field] + (next[field] - prev[field]) * f;
     }
     return prev[field];

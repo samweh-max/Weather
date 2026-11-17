@@ -827,8 +827,9 @@ const sky_ = (() => {
     resize();
   }
   function resize() {
-    // The sky is soft and blurry, so 1.5× is as sharp as it needs to be on any screen.
-    dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    // The sky is soft and blurry (glows, clouds, thin rain), so one canvas pixel per screen
+    // point looks the same and costs a half to a ninth of the drawing on a sharp phone screen.
+    dpr = 1;
     w = canvas.clientWidth; h = canvas.clientHeight;
     canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -875,7 +876,9 @@ const sky_ = (() => {
     prev = now;
     if (!skip && gap > 21) skip = true;
     odd = !odd;
-    if (!(skip && odd)) {
+    // Nothing to see behind an open sheet, so don't draw.
+    const covered = document.querySelector("dialog[open]");
+    if (!covered && !(skip && odd)) {
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
       frame(dt);
