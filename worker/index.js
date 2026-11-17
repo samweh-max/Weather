@@ -76,7 +76,7 @@ async function forecast(url, env, ctx) {
   const cache = typeof caches !== "undefined" ? caches.default : null;
   const cacheKey = new Request(`https://cache.weather/${id}/${place.lat.toFixed(2)}/${place.lon.toFixed(2)}/${tz}`);
   if (cache) {
-    const hit = await cache.match(cacheKey);
+    const hit = reuse(await cache.match(cacheKey), url);
     if (hit) return hit;
   }
 
@@ -90,7 +90,7 @@ async function forecast(url, env, ctx) {
   const res = json(body);
   if (cache && providers.every((p) => p.ok)) {
     const toCache = new Response(JSON.stringify(body), {
-      headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": `public, max-age=${source.ttl}` },
+      headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": `public, max-age=${source.ttl}`, "X-Stored": String(Date.now()) },
     });
     const put = cache.put(cacheKey, toCache);
     if (ctx && ctx.waitUntil) ctx.waitUntil(put);
@@ -106,7 +106,7 @@ async function home(url, env, ctx) {
   const lon = Number(url.searchParams.get("lon"));
   if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return json({ error: "Bad coordinates" }, 400);
   try {
-    return json({ enabled: true, ...(await homeNear({ lat, lon }, env, ctx)) });
+    return json({ enabled: true, ...(await homeNear({ lat, lon }, env, ctx, fetch, url.searchParams.has("fresh"))) });
   } catch (err) {
     return json({ enabled: true, error: String(err.message || err) }, 502);
   }
@@ -148,13 +148,13 @@ async function stations(url, env, ctx) {
   const cache = typeof caches !== "undefined" ? caches.default : null;
   const key = new Request(`https://cache.weather/stations/${lat.toFixed(2)}/${lon.toFixed(2)}`);
   if (cache) {
-    const hit = await cache.match(key);
+    const hit = reuse(await cache.match(key), url);
     if (hit) return hit;
   }
   const body = { ...(await stationsNear({ lat, lon }, env)), fetchedAt: new Date().toISOString() };
   if (cache) {
     const put = cache.put(key, new Response(JSON.stringify(body), {
-      headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=600" },
+      headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=600", "X-Stored": String(Date.now()) },
     }));
     if (ctx && ctx.waitUntil) ctx.waitUntil(put);
   }
@@ -578,6 +578,18 @@ async function getJson(url, opts = {}) {
     throw new Error(`Provider returned ${res.status}${hint}${why ? `: ${why}` : ""}`);
   }
   return res.json();
+}
+
+// A copy kept by the Worker. It goes to the phone marked "don't keep", so the phone always asks
+// again (otherwise its own cache would hide new data from the refresh button). When the refresh
+// button asks for fresh data (?fresh), copies older than two minutes are skipped; younger ones
+// are still used, to stay inside the providers' free limits.
+function reuse(hit, url) {
+  if (!hit) return null;
+  if (url.searchParams.has("fresh") && Date.now() - Number(hit.headers.get("X-Stored") || 0) > 120e3) return null;
+  const h = new Headers(hit.headers);
+  h.set("Cache-Control", "no-store");
+  return new Response(hit.body, { status: hit.status, headers: h });
 }
 
 function json(body, status = 200) {

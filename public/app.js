@@ -79,20 +79,28 @@ async function loadSources() {
   return state.sources;
 }
 
-async function refresh() {
+// `fresh` is the refresh button: ask the Worker for new data rather than its recent copy.
+let refreshing = 0;
+async function refresh(fresh = false) {
   const place = state.place;
   if (!place) return;
+  const run = ++refreshing;
+  const btn = $("#refreshBtn");
+  btn.classList.remove("done");
+  btn.classList.add("spin");
   const sources = (await loadSources()).filter((s) => s.enabled && sourceVisible(s.id));
-  $("#refreshBtn").classList.add("spin");
   state.sourceErrors = {};
-  const stationsDone = loadStations(place).then(render);
-  loadHome(); // your own station arrives on its own; nothing waits for it
+  const extra = fresh ? "&fresh=1" : "";
+  const stationsDone = loadStations(place, extra).then(render);
+  // Your own station arrives on its own; the page never waits for it, but the button does.
+  const homeDone = loadHome(extra);
   await Promise.all(
     sources.map(async (s) => {
       state.loading.add(s.id);
       render();
       try {
         const q = new URLSearchParams({ source: s.id, lat: place.lat, lon: place.lon, tz: place.tz || "UTC" });
+        if (fresh) q.set("fresh", "1");
         const body = await api(`/api/forecast?${q}`);
         if (state.place !== place) return;
         for (const p of body.providers) state.results[p.id] = p;
@@ -106,12 +114,17 @@ async function refresh() {
     })
   );
   await stationsDone;
-  if (state.place !== place) return;
-  recordSnapshot();
-  state.fetchedAt = Date.now();
-  store.set("wc.last", { key: placeKey(place), results: state.results, fetchedAt: state.fetchedAt });
-  $("#refreshBtn").classList.remove("spin");
-  render();
+  if (state.place === place) {
+    recordSnapshot();
+    state.fetchedAt = Date.now();
+    store.set("wc.last", { key: placeKey(place), results: state.results, fetchedAt: state.fetchedAt });
+    render();
+  }
+  await homeDone;
+  if (run !== refreshing) return;
+  // Stop spinning and show a tick for a moment, so it's clear the refresh finished.
+  btn.classList.remove("spin");
+  if (fresh) { btn.classList.add("done"); setTimeout(() => btn.classList.remove("done"), 1400); }
 }
 
 function placeKey(p) { return `${p.lat.toFixed(2)},${p.lon.toFixed(2)}`; }
@@ -364,7 +377,7 @@ function applyHero(m) {
 
 function renderHeader() {
   $("#placeName").textContent = state.place ? state.place.name : "Choose a place";
-  $("#refreshBtn").classList.toggle("spin", state.loading.size > 0);
+  if (state.loading.size > 0) $("#refreshBtn").classList.add("spin");
 }
 
 function dayLabel(date, i) {
@@ -419,6 +432,46 @@ function sunElevation(t, lat, lon) {
   const gmst = (18.697374558 + 24.06570982441908 * d) * 15;
   const H = rad * (gmst + lon) - ra;
   return Math.asin(Math.sin(lat * rad) * Math.sin(dec) + Math.cos(lat * rad) * Math.cos(dec) * Math.cos(H)) / rad;
+}
+
+// Is the sun down at the place right now, or at a local hour on a date? Uses the real sunrise
+// and sunset rather than a fixed clock, so winter evenings and summer nights are right.
+function darkNow() {
+  if (!state.place) return Number(placeHour()) < 7 || Number(placeHour()) >= 18;
+  return sunElevation(Date.now(), state.place.lat, state.place.lon) < -0.833;
+}
+function darkAt(date, hour) {
+  if (!state.place) return hour < 7 || hour >= 19;
+  const s = sunTimes(date, state.place.lat, state.place.lon);
+  if (s.polar) return s.polar === "night";
+  const m = hour * 60 + 30;
+  return m < placeClock(s.rise).mins || m > placeClock(s.set).mins;
+}
+
+// Where the sun and moon are in the sky: height above the horizon and compass bearing, in
+// degrees. Low-precision formulas, good to about a degree, which is plenty for a picture.
+function skyPos(ra, dec, t, lat, lon) {
+  const rad = Math.PI / 180, d = t / 864e5 - 10957.5;
+  const H = rad * ((18.697374558 + 24.06570982441908 * d) * 15 + lon) - ra, phi = lat * rad;
+  const alt = Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H));
+  const az = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi));
+  return { alt: alt / rad, az: (az / rad + 180 + 360) % 360 };
+}
+function sunPos(t, lat, lon) {
+  const rad = Math.PI / 180, d = t / 864e5 - 10957.5;
+  const g = rad * (357.529 + 0.98560028 * d), q = 280.459 + 0.98564736 * d;
+  const L = rad * (q + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)), e = rad * (23.439 - 0.00000036 * d);
+  return skyPos(Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L)), Math.asin(Math.sin(e) * Math.sin(L)), t, lat, lon);
+}
+function moonPos(t, lat, lon) {
+  const rad = Math.PI / 180, d = t / 864e5 - 10957.5, e = rad * 23.4397;
+  const M = rad * (134.963 + 13.064993 * d), F = rad * (93.272 + 13.22935 * d);
+  const l = rad * (218.316 + 13.176396 * d) + rad * 6.289 * Math.sin(M), b = rad * 5.128 * Math.sin(F);
+  const ra = Math.atan2(Math.sin(l) * Math.cos(e) - Math.tan(b) * Math.sin(e), Math.cos(l));
+  const dec = Math.asin(Math.sin(b) * Math.cos(e) + Math.cos(b) * Math.sin(e) * Math.sin(l));
+  // Age in the 29.5-day cycle since a known new moon (6 Jan 2000).
+  const age = (((t - 947182440000) / 864e5) % 29.530589 + 29.530589) % 29.530589;
+  return { ...skyPos(ra, dec, t, lat, lon), age, lit: (1 - Math.cos((2 * Math.PI * age) / 29.530589)) / 2 };
 }
 
 // The day's sun as a gentle wave from midnight to midnight: the real height of the sun through
@@ -486,7 +539,8 @@ function renderHero(date, c) {
     return;
   }
   sky.dataset.code = c.code;
-  sky_.set({ code: c.code, wind: c.wind, dir: c.dir });
+  // Today the sky shows the real sun or moon; another day shows that day in daylight.
+  sky_.set({ code: c.code, wind: c.wind, dir: c.dir, day: date !== placeToday() });
 
   const today = date === placeToday();
   const headline = c.wet > c.n / 2 && c.code !== "drizzle" ? `${WORDS[c.code]} likely` : WORDS[c.code];
@@ -651,7 +705,7 @@ function renderHours(r, date) {
   const box = el("div", { class: "hours" });
   hrs.forEach((h, i) => {
     const hour = Number(h.time.slice(11, 13));
-    const night = hour < 7 || hour >= 19;
+    const night = darkAt(h.time.slice(0, 10), hour);
     const label = i === 0 && date === placeToday() ? "Now" : h.time.slice(0, 10) !== date && hour === 0 ? dayLabel(h.time.slice(0, 10), 1) : h.time.slice(11, 13);
     const cell = el("div", { class: "hour" });
     cell.innerHTML = `<span class="t">${label}</span>${wxIcon(h.code, night, "i")}<span class="v">${fmt.temp(h.temp)}</span>
@@ -690,9 +744,12 @@ const sky_ = (() => {
   let drops = [], flakes = [], clouds = [], streaks = [], flash = 0, nextFlash = 3;
   // Soft shapes are drawn once into small images and then just moved each frame, which is far
   // cheaper than building gradients sixty times a second.
-  let puff = null, glow = null, rays = null;
+  let puff = null, glow = null, rays = null, warm = null, mglow = null;
+  // The real sun and moon for the place, worked out every half a minute.
+  let lights = null, lightsAt = -1e9, stars = [];
   function sprites() {
     if (puff) return;
+    warm = (() => { const c = document.createElement("canvas"); c.width = 512; c.height = 256; const g = c.getContext("2d"); const gr = g.createRadialGradient(256, 256, 0, 256, 256, 256); gr.addColorStop(0, "rgba(255,170,110,0.55)"); gr.addColorStop(0.45, "rgba(255,140,120,0.18)"); gr.addColorStop(1, "rgba(255,130,120,0)"); g.fillStyle = gr; g.fillRect(0, 0, 512, 256); return c; })();
     const mk = (size, draw) => { const c = document.createElement("canvas"); c.width = c.height = size; draw(c.getContext("2d"), size / 2); return c; };
     puff = mk(256, (g, r) => { const gr = g.createRadialGradient(r, r, 0, r, r, r); gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = gr; g.fillRect(0, 0, 2 * r, 2 * r); });
     glow = mk(400, (g, r) => { const gr = g.createRadialGradient(r, r, 0, r, r, r); gr.addColorStop(0, "rgba(255,236,170,0.55)"); gr.addColorStop(0.35, "rgba(255,226,150,0.18)"); gr.addColorStop(1, "rgba(255,226,150,0)"); g.fillStyle = gr; g.fillRect(0, 0, 2 * r, 2 * r); });
@@ -705,6 +762,56 @@ const sky_ = (() => {
         g.fillStyle = rg; g.beginPath(); g.moveTo(0, 0); g.lineTo(260, -14); g.lineTo(260, 14); g.closePath(); g.fill();
       }
     });
+    mglow = mk(200, (g, r) => { const gr = g.createRadialGradient(r, r, 0, r, r, r); gr.addColorStop(0, "rgba(220,230,255,0.35)"); gr.addColorStop(1, "rgba(220,230,255,0)"); g.fillStyle = gr; g.fillRect(0, 0, 2 * r, 2 * r); });
+  }
+
+  // How much of the sun, moon and stars each kind of weather lets through.
+  const SEE = { clear: 1, partly: 0.75, cloudy: 0.2, fog: 0.15, drizzle: 0.1, sleet: 0.05, snow: 0.05 };
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+  function updateLights() {
+    lightsAt = performance.now() / 1000;
+    const pl = typeof state !== "undefined" && state.place;
+    const south = pl && pl.lat < 0;
+    if (!pl || cfg.day) {
+      lights = { south, sun: { alt: 40, az: south ? 0 : 180 }, moon: null };
+    } else {
+      const t = Date.now();
+      lights = { south, sun: sunPos(t, pl.lat, pl.lon), moon: moonPos(t, pl.lat, pl.lon) };
+    }
+    // Darkness from the end of daylight to the end of twilight, about 6° below the horizon.
+    lights.night = clamp01((2 - lights.sun.alt) / 9);
+    const sky = canvas && canvas.parentElement;
+    if (sky) sky.style.setProperty("--night", (lights.night * 0.9).toFixed(3));
+  }
+  // Facing the equator: east on the left in the north, on the right in the south. The higher
+  // the sun, the higher on screen; the horizon sits two thirds of the way down.
+  function toScreen(p) {
+    const rel = lights.south ? ((p.az + 180) % 360) - 180 : p.az - 180;
+    const hy = h * 0.7;
+    return {
+      x: Math.max(w * 0.1, Math.min(w * 0.9, w * (0.5 + (rel / 180) * 0.5))),
+      y: Math.max(h * 0.1, hy - (p.alt / 35) * (hy - h * 0.12)),
+      hy,
+    };
+  }
+  function drawMoon(m, see) {
+    const a = clamp01((m.alt + 1) / 4) * clamp01(lights.night * 1.4) * Math.max(see, 0.1);
+    if (a < 0.02) return;
+    const { x, y } = toScreen(m), r = 13;
+    ctx.globalAlpha = a;
+    ctx.drawImage(mglow, x - 90, y - 90, 180, 180);
+    // The whole disc faintly, then the lit part: half the disc plus or minus the terminator.
+    ctx.fillStyle = "rgba(235,240,255,0.14)";
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.283); ctx.fill();
+    const k = Math.cos((2 * Math.PI * m.age) / 29.530589);
+    let side = m.age < 14.765 ? 1 : -1;
+    if (lights.south) side = -side;
+    ctx.fillStyle = "rgba(246,247,252,0.95)";
+    ctx.beginPath();
+    ctx.arc(x, y, r, -Math.PI / 2, Math.PI / 2, side < 0);
+    ctx.ellipse(x, y, r * Math.abs(k), r, 0, Math.PI / 2, -Math.PI / 2, (k > 0) === (side > 0));
+    ctx.fill();
+    ctx.globalAlpha = 1;
   }
   const still = matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -742,6 +849,10 @@ const sky_ = (() => {
     drops = Array.from({ length: rainN }, () => ({ x: Math.random() * w, y: Math.random() * h, l: 10 + Math.random() * 14, v: 520 + Math.random() * 320, a: 0.18 + Math.random() * 0.25 }));
     flakes = Array.from({ length: snowN }, () => ({ x: Math.random() * w, y: Math.random() * h, r: 1 + Math.random() * 2.2, v: 25 + Math.random() * 40, p: Math.random() * 6.28 }));
     clouds = Array.from({ length: cloudN }, (_, i) => ({ x: Math.random() * w, y: h * (0.08 + 0.55 * Math.random()), r: 70 + Math.random() * 90, a: (c === "fog" ? 0.16 : 0.1) + Math.random() * 0.08, s: 0.6 + (i % 3) * 0.25 }));
+    if (!stars.length || stars.w !== w) {
+      stars = Array.from({ length: Math.round(w * h / 5000) }, () => ({ x: Math.random() * w, y: Math.random() * h * 0.62, r: 0.5 + Math.random() * 0.9, p: Math.random() * 6.28, s: 0.6 + Math.random() * 1.6 }));
+      stars.w = w;
+    }
     const sN = windVec().k > 18 ? Math.round(windVec().k / 4) : 0;
     streaks = Array.from({ length: sN }, () => newStreak(true));
   }
@@ -778,19 +889,45 @@ const sky_ = (() => {
     ctx.clearRect(0, 0, w, h);
 
     sprites();
-    if (cfg.code === "clear" || cfg.code === "partly") {
-      // Soft sun glow with slowly turning rays.
-      const sx = w * 0.82, sy = h * 0.14, gr = 190 * (1 + Math.sin(t * 0.6) * 0.04);
-      ctx.drawImage(glow, sx - gr, sy - gr, gr * 2, gr * 2);
-      ctx.save(); ctx.translate(sx, sy); ctx.rotate(t * 0.04);
-      ctx.drawImage(rays, -270, -270);
-      ctx.restore();
+    if (!lights || t - lightsAt > 30) updateLights();
+    const see = SEE[cfg.code] || 0;
+
+    // Stars on clear and partly cloudy nights, gently twinkling.
+    const starA = lights.night * (cfg.code === "clear" ? 1 : cfg.code === "partly" ? 0.55 : 0);
+    if (starA > 0.02) {
+      ctx.fillStyle = "#fff";
+      for (const s of stars) {
+        ctx.globalAlpha = starA * (0.35 + 0.45 * (0.5 + 0.5 * Math.sin(t * s.s + s.p)));
+        ctx.fillRect(s.x, s.y, s.r, s.r);
+      }
+      ctx.globalAlpha = 1;
     }
+    if (lights.moon && lights.moon.alt > -2) drawMoon(lights.moon, see);
+
+    // The sun where it really is: warm and low at sunrise and sunset, gone at night.
+    const sun = lights.sun, sp = toScreen(sun);
+    const glowA = clamp01((sun.alt + 4) / 8);
+    const lowA = clamp01(1 - Math.abs(sun.alt - 1) / 9) * Math.max(see, 0.25);
+    if (lowA > 0.02) {
+      ctx.globalAlpha = lowA;
+      ctx.drawImage(warm, sp.x - w * 0.7, sp.hy - h * 0.55, w * 1.4, h * 0.7);
+    }
+    if (see > 0 && glowA > 0.02) {
+      const gr = 190 * (1 + Math.sin(t * 0.6) * 0.04);
+      ctx.globalAlpha = glowA * Math.min(1, see * 1.15);
+      ctx.drawImage(glow, sp.x - gr, sp.y - gr, gr * 2, gr * 2);
+      if (see >= 0.75) {
+        ctx.save(); ctx.translate(sp.x, sp.y); ctx.rotate(t * 0.04);
+        ctx.drawImage(rays, -270, -270);
+        ctx.restore();
+      }
+    }
+    ctx.globalAlpha = 1;
 
     for (const c of clouds) {
       c.x += (wv.x * 0.9 + (wv.x >= 0 ? 4 : -4)) * c.s * dt;
       if (c.x - c.r > w) c.x = -c.r; else if (c.x + c.r < 0) c.x = w + c.r;
-      ctx.globalAlpha = c.a;
+      ctx.globalAlpha = c.a * (1 - 0.45 * lights.night);
       for (const [ox, oy, f] of [[0, 0, 1], [c.r * 0.55, c.r * 0.12, 0.75], [-c.r * 0.5, c.r * 0.15, 0.7]]) {
         const r = c.r * f;
         ctx.drawImage(puff, c.x + ox - r, c.y + oy - r, r * 2, r * 2);
@@ -853,9 +990,10 @@ const sky_ = (() => {
     const changed = next.code !== cfg.code || Math.round((next.wind || 0) / 5) !== Math.round((cfg.wind || 0) / 5) || Math.round((next.dir || 0) / 20) !== Math.round((cfg.dir || 0) / 20);
     cfg = { ...next };
     if (!ctx) setup();
+    if (ctx) { updateLights(); if (still.matches && !changed) frame(0); }
     if (changed && ctx) { seed(); if (still.matches) frame(0); }
   }
-  return { set };
+  return { set, relight: () => ctx && updateLights() };
 })();
 
 // ---------- Pages ----------
@@ -974,10 +1112,10 @@ function initSheetDrag() {
 
 // ---------- Stations data and the Forecaster ----------
 
-async function loadStations(place) {
+async function loadStations(place, extra = "") {
   state.stationsLoading = true;
   try {
-    const body = await api(`/api/stations?lat=${place.lat}&lon=${place.lon}`);
+    const body = await api(`/api/stations?lat=${place.lat}&lon=${place.lon}${extra}`);
     if (state.place !== place) return;
     state.stationsRaw = body;
   } catch (err) {
@@ -1074,7 +1212,7 @@ const rate = { code: null, tempMode: null, temp: null, wind: null, base: null };
 function openRate(pred) {
   const h = pred && pred.hours[0];
   if (!h) return;
-  const night = Number(placeHour()) < 7 || Number(placeHour()) >= 18;
+  const night = darkNow();
   Object.assign(rate, { code: null, tempMode: null, temp: null, wind: null, base: h.temp });
   const sheet = $("#rateSheet");
   sheet.classList.remove("thanks");
@@ -1439,7 +1577,7 @@ function heroStations(st) {
   return {
     code, wind: o.wind, dir: o.dir,
     html: `<div class="mini" aria-label="Measured now near you">
-      ${wxIcon(code, Number(placeHour()) < 7 || Number(placeHour()) >= 18, "mi")}
+      ${wxIcon(code, darkNow(), "mi")}
       <span class="mt">${o.temp != null ? fmt.temp(o.temp) : "–"}</span>
       <span class="ms"><b>Measured now</b>${[rain, `${(st.stations || []).length} stations`].filter(Boolean).join(" · ")}</span>
       ${wind}
@@ -1784,14 +1922,19 @@ function demoHome(lat, lon) {
 }
 
 function demoHomeHistory(q) {
-  const from = Number(q.get("from")), to = Number(q.get("to")), id = q.get("ids");
+  const series = {};
+  for (const id of (q.get("ids") || "").split(",").filter(Boolean)) Object.assign(series, demoHomeSeries(q, id).series);
+  return { from: Number(q.get("from")), to: Number(q.get("to")), series };
+}
+function demoHomeSeries(q, id) {
+  const from = Number(q.get("from")), to = Number(q.get("to"));
   const span = to - from;
   const steps = [5, 15, 30, 60, 180, 360, 720, 1440, 10080].map((m) => m * 60000);
   const step = steps.find((x) => x >= 15 * 60000 && span / x <= 400) || steps[steps.length - 1];
   const wave = (t) => Math.sin(((new Date(t).getHours() + new Date(t).getMinutes() / 60 - 9) / 24) * 2 * Math.PI);
   const season = (t) => 10 - 6 * Math.cos(((t / 864e5 - 15) / 365) * 2 * Math.PI);
   const noise = (t) => { const x = Math.sin(t / 3.7e6) * 43758.5453; return x - Math.floor(x); };
-  const base = { t: (x) => season(x) + 4 * wave(x), tmax: (x) => season(x) + 5 * wave(x), tmin: (x) => season(x) + 3 * wave(x), rh: (x) => 80 - 12 * wave(x), ws: (x) => (3 + 2 * Math.sin(x / 9e6) + noise(x)) * 3.6, wsmax: (x) => (6 + 3 * Math.sin(x / 9e6) + 2 * noise(x)) * 3.6, wd: (x) => 200 + 60 * noise(x), bp: (x) => 1010 + 8 * Math.sin(x / 2.6e8), rain: (x) => (noise(x * 1.3) > 0.86 ? noise(x) * 0.8 : 0), slr: (x) => Math.max(0, 300 * wave(x)) }[id] || ((x) => 12 + noise(x));
+  const base = { t: (x) => season(x) + 4 * wave(x), tmax: (x) => season(x) + 5 * wave(x), tmin: (x) => season(x) + 3 * wave(x), rh: (x) => 80 - 12 * wave(x), ws: (x) => (3 + 2 * Math.sin(x / 9e6) + noise(x)) * 3.6, wsmax: (x) => (6 + 3 * Math.sin(x / 9e6) + 2 * noise(x)) * 3.6, wd: (x) => (noise(x / 3) > 0.8 ? 20 + 80 * noise(x) : 205 + 50 * (noise(x) - 0.5) + 30 * Math.sin(x / 2e8) + 360) % 360, bp: (x) => 1010 + 8 * Math.sin(x / 2.6e8), rain: (x) => (noise(x * 1.3) > 0.86 ? noise(x) * 0.8 : 0), slr: (x) => Math.max(0, 300 * wave(x)) }[id] || ((x) => 12 + noise(x));
   const buckets = [];
   for (let t = Math.floor(from / step) * step; t < to; t += step) {
     if (noise(t * 7) > 0.985) continue; // the odd gap
@@ -1874,7 +2017,7 @@ function init() {
     if (stat && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); showTip(stat); }
   });
   $("#settingsBtn").onclick = openSettings;
-  $("#refreshBtn").onclick = () => refresh();
+  $("#refreshBtn").onclick = () => refresh(true);
   $("#gpsBtn").onclick = useGps;
   $("#search").oninput = onSearch;
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => goPage(b.dataset.page)));

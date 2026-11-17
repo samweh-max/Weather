@@ -17,13 +17,13 @@ function homeInit() {
   state.homeLoading = false;
 }
 
-async function loadHome() {
+async function loadHome(extra = "") {
   if (!state.place) return;
   state.homeLoading = true;
   syncStations();
   render();
   try {
-    const body = await api(`/api/home?lat=${state.place.lat}&lon=${state.place.lon}`);
+    const body = await api(`/api/home?lat=${state.place.lat}&lon=${state.place.lon}${extra}`);
     state.home = body;
     if (body.enabled === false) store.set("wc.home", { enabled: false });
     else if (body.station) store.set("wc.home", { enabled: true, station: body.station, history: body.history });
@@ -109,20 +109,47 @@ const STAT_WORDS = [[/_?(avg|mean|wvt|_s_)/i, "average"], [/_?(max|tmx)/i, "high
 
 function tableWords(t) {
   if (!t) return "";
-  const m = /(\d+)\s*(m|min)?$/i.exec(t);
+  const m = /(\d+)\s*_?(m|mins?|minutes?)?$/i.exec(t);
   if (/day|daily|24/i.test(t)) return "daily";
   if (/hour|60/i.test(t)) return "hourly";
   if (m && +m[1] > 0 && +m[1] < 60) return `every ${+m[1]} min`;
   return t.replace(/_/g, " ").toLowerCase();
 }
 
+// Campbell soil probes (CS650/CS655) log water content, saltiness and their own temperature
+// under short names: T_Avg there is the soil, not the air.
+const SOIL_WORDS = [
+  [/^t(_|$)/i, "Soil temperature"],
+  [/^ec(_|$)/i, "Soil saltiness (conductivity)"],
+  [/^p(_|$)/i, "Soil permittivity"],
+  [/^pa(_|$)/i, "Soil probe signal time"],
+  [/^vr(_|$)/i, "Soil probe signal ratio"],
+];
+const EXTRA_WORDS = [
+  [/diag/i, "Wind sensor health"],
+  [/^record$/i, "Record number"],
+];
+const hasSoilProbe = (all) => (all || []).some((x) => /vwc/i.test(x.field || ""));
+function sensorWords(f, all) {
+  const soil = hasSoilProbe(all) && SOIL_WORDS.find(([re]) => re.test(f));
+  return soil || EXTRA_WORDS.find(([re]) => re.test(f)) || SENSOR_WORDS.find(([re]) => re.test(f));
+}
+
 function sensorName(r, all) {
   const f = r.field || "";
-  const hit = SENSOR_WORDS.find(([re]) => re.test(f));
+  const name = sensorBase(r, all);
+  // Two different sensors that still read the same: name the logger field so they can't be mixed up.
+  const same = (all || []).some((x) => x !== r && x.field !== f && x.table === r.table && sensorBase(x, all) === name);
+  return same ? `${name} · ${f}` : name;
+}
+
+function sensorBase(r, all) {
+  const f = r.field || "";
+  const hit = sensorWords(f, all);
   let name = hit ? hit[1] : f.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\s+/g, " ").trim();
   const stat = STAT_WORDS.find(([re]) => re.test(f.replace(/^[^_]+/, "")));
   // Leave out "average" on the common case; say it where it tells two sensors apart.
-  const twins = (all || []).filter((x) => x !== r && SENSOR_WORDS.find(([re]) => re.test(x.field || "")) === hit && hit);
+  const twins = (all || []).filter((x) => x !== r && hit && sensorWords(x.field || "", all) === hit);
   const plain = (stat && stat[1] === "average" && (r.main || !twins.length)) || (stat && stat[1] === "total" && hit && hit[1] === "Rain" && r.main);
   if (stat && !plain && !(hit && /gust/i.test(hit[1]))) name += `, ${stat[1]}`;
   if (twins.some((x) => x.field === r.field && x.table !== r.table)) name += ` (${tableWords(r.table)})`;
@@ -146,6 +173,7 @@ function sensorValue(r) {
     case "pressure": return Math.round(std) + " hPa";
   }
   if (/^(deg\s*c|°c|degc|c)$/i.test(u)) return fmt.temp(v);
+  if (/^m\^?3\/m\^?3$/i.test(u)) return `${Math.round(v * 1000) / 10}%`;
   const nice = UNIT_WORDS[u.toLowerCase()] ?? u;
   const n = Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10;
   return `${n.toLocaleString()}${nice ? (nice === "%" || nice === "°" || nice === "°C" ? "" : " ") + nice : ""}`;
@@ -242,13 +270,20 @@ function homeCardWire(box) {
 }
 
 // ---------- History explorer ----------
+// Pick up to four sensors; each gets the chart that suits it: a compass for wind, bars for
+// rain, a line coloured by warmth for temperature, a filled curve for sunshine, and a plain
+// line for the rest. Line charts share one time axis and are read together with one touch.
 
 const DAY = 864e5;
-const hx = { sensor: null, span: "day", anchor: null, from: null, to: null, data: null, loading: false, error: null, scrub: null, req: 0 };
+const MAX_PICK = 4;
+const hx = { ids: [], span: "day", anchor: null, from: null, to: null, data: null, loading: false, error: null, scrub: null, picking: false, rose: {}, req: 0 };
 const histCache = new Map();
 
 function localMidnight(t) { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); }
 function addDays(t, n) { const d = new Date(t); d.setDate(d.getDate() + n); return d.getTime(); }
+function isoDay(t) { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function parseDay(v) { const [y, m, d] = String(v).split("-").map(Number); return new Date(y, m - 1, d).getTime(); }
+function fmtTick(v) { return Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : String(Math.round(v * 10) / 10); }
 
 function histRange() {
   const a = localMidnight(hx.anchor);
@@ -276,48 +311,6 @@ function histLabel() {
   return `${d(from, { day: "numeric", month: "short", year: sameYear ? undefined : "numeric" })} – ${d(last, { day: "numeric", month: "short", year: "numeric" })}`;
 }
 
-function openHistory(id) {
-  const s = homeHere() || (state.home && state.home.station);
-  if (!s) return;
-  const all = s.readings || [];
-  hx.sensor = all.find((r) => r.id === id) || all.find((r) => r.kind === "temp" && r.main) || all[0];
-  if (!hx.sensor) return;
-  if (hx.anchor == null) hx.anchor = Date.now();
-  if (hx.from == null) { hx.to = Date.now(); hx.from = addDays(Date.now(), -6); }
-  hx.scrub = null;
-  const sheet = $("#histSheet");
-  sheet.querySelector("h2").textContent = s.name;
-  drawHistory();
-  if (!sheet.open) sheet.showModal();
-  fetchHistory();
-}
-
-async function fetchHistory() {
-  const { from, to } = histRange();
-  const id = hx.sensor.id;
-  const key = `${id}/${from}/${to}`;
-  const req = ++hx.req;
-  hx.error = null;
-  if (histCache.has(key)) { hx.data = histCache.get(key); hx.loading = false; drawHistory(); return; }
-  hx.loading = true;
-  drawHistory();
-  try {
-    const q = new URLSearchParams({ from, to, ids: id, offset: -new Date(from).getTimezoneOffset() });
-    const body = await api(`/api/home/history?${q}`);
-    const series = body.series && body.series[id];
-    let data = series ? { ...series, from, to } : { buckets: [], from, to };
-    if (hx.sensor.kind === "rain" && data.buckets.length) data = rainTotals(data);
-    histCache.set(key, data);
-    if (req !== hx.req) return;
-    hx.data = data;
-  } catch (err) {
-    if (req !== hx.req) return;
-    hx.error = err.message;
-  }
-  hx.loading = false;
-  drawHistory();
-}
-
 // Numbers for the chart, in the user's units.
 function histUnit(r) {
   switch (r.kind) {
@@ -331,97 +324,6 @@ function histUnit(r) {
   const u = (UNIT_WORDS[(r.unit || "").trim().toLowerCase()] ?? r.unit ?? "").trim();
   if (u === "°C") return histUnit({ kind: "temp" });
   return { f: (v) => v, u: u ? (u === "%" || u === "°" ? u : " " + u) : "", dp: 1 };
-}
-
-function drawHistory() {
-  const sheet = $("#histSheet");
-  const s = homeHere() || (state.home && state.home.station);
-  if (!sheet || !s) return;
-  const all = s.readings || [];
-  const r = hx.sensor;
-  const isRain = r.kind === "rain";
-  const U = histUnit(r);
-  const conv = U.f;
-  const show = (v) => (v == null ? "–" : `${(Math.round(conv(v) * 10 ** U.dp) / 10 ** U.dp).toLocaleString()}${U.u}`);
-
-  // Which sensor: the ones the app understands first, then everything else.
-  const known = all.filter((x) => x.kind && x.main);
-  const chips = known.map((x) => `<button class="hchip${x.id === r.id ? " on" : ""}" data-s="${esc(x.id)}">${esc(sensorName(x, all))}</button>`).join("");
-  const others = all.filter((x) => !known.includes(x)).sort((a, b) => sensorName(a, all).localeCompare(sensorName(b, all)));
-  const more = others.length ? `<select class="hmore${known.includes(r) ? "" : " on"}" aria-label="Other sensors"><option value="">${known.includes(r) ? "More…" : esc(sensorName(r, all))}</option>${others.map((x) => `<option value="${esc(x.id)}"${x.id === r.id ? " selected" : ""}>${esc(sensorName(x, all))}</option>`).join("")}</select>` : "";
-
-  const spans = [["day", "Day"], ["week", "Week"], ["month", "Month"], ["year", "Year"], ["custom", "Custom"]];
-  const seg = spans.map(([v, l]) => `<button data-span="${v}" aria-pressed="${hx.span === v}">${l}</button>`).join("");
-  const { end } = histRange();
-  const atEnd = end > Date.now();
-  const nav = hx.span === "custom"
-    ? `<div class="hcustom"><label>From<input type="date" id="hFrom" value="${isoDay(hx.from)}" max="${isoDay(Date.now())}"></label><label>To<input type="date" id="hTo" value="${isoDay(hx.to)}" max="${isoDay(Date.now())}"></label></div>`
-    : `<div class="hnav"><button data-step="-1" aria-label="Earlier">${CHEV}</button>
-        <label class="hlabel"><span>${esc(histLabel())}</span><input type="date" id="hPick" value="${isoDay(hx.anchor)}" max="${isoDay(Date.now())}" aria-label="Pick a date"></label>
-        <button data-step="1" aria-label="Later"${atEnd ? " disabled" : ""}>${CHEV}</button></div>`;
-
-  const b = (hx.data && !hx.loading && hx.data.buckets) || [];
-  let chart, stats = "";
-  if (hx.loading) chart = `<div class="hchart sk-chart" aria-busy="true"><span class="sk"></span></div>`;
-  else if (hx.error) chart = `<div class="hchart hmsg">${esc(hx.error)}</div>`;
-  else if (!b.length) chart = `<div class="hchart hmsg">No readings in this range.</div>`;
-  else {
-    chart = histChart(b, hx.data, isRain, conv, U, r);
-    stats = histStats(b, isRain, show, hx.data.step);
-  }
-  hxShow = { show, isRain };
-  const readout = `<div class="hread idle"><span>${b.length ? "Touch the chart to read a value" : "&nbsp;"}</span></div>`;
-
-  sheet.querySelector(".hbody").innerHTML = `
-    <div class="hchips">${chips}${more}</div>
-    <div class="hseg" role="group" aria-label="Range">${seg}</div>
-    ${nav}
-    ${readout}
-    ${chart}
-    ${stats}`;
-
-  // Wiring.
-  const body = sheet.querySelector(".hbody");
-  body.querySelectorAll("[data-s]").forEach((x) => (x.onclick = () => pickSensor(x.dataset.s)));
-  const sel = body.querySelector(".hmore");
-  if (sel) sel.onchange = () => sel.value && pickSensor(sel.value);
-  body.querySelectorAll("[data-span]").forEach((x) => (x.onclick = () => { hx.span = x.dataset.span; if (hx.span !== "custom") hx.anchor = Math.min(hx.anchor, Date.now()); hx.scrub = null; fetchHistory(); }));
-  body.querySelectorAll("[data-step]").forEach((x) => (x.onclick = () => stepRange(Number(x.dataset.step))));
-  const pick = body.querySelector("#hPick");
-  if (pick) {
-    pick.onchange = () => { if (pick.value) { hx.anchor = parseDay(pick.value); hx.scrub = null; fetchHistory(); } };
-    body.querySelector(".hlabel span").onclick = () => { try { pick.showPicker(); } catch { pick.focus(); } };
-  }
-  const f = body.querySelector("#hFrom"), t = body.querySelector("#hTo");
-  if (f && t) {
-    const go = () => {
-      let a = parseDay(f.value), z = parseDay(t.value);
-      if (!isFinite(a) || !isFinite(z)) return;
-      if (a > z) [a, z] = [z, a];
-      if (z - a > 365 * DAY) a = addDays(z, -365);
-      hx.from = a; hx.to = z; hx.scrub = null; fetchHistory();
-    };
-    f.onchange = go; t.onchange = go;
-  }
-  const svg = body.querySelector("svg.hsvg");
-  if (svg) { wireScrub(svg); drawScrub(svg); }
-}
-
-let hxGeo = null, hxShow = null;
-// The touched value: a line on the chart and the reading above it, without redrawing the chart.
-function drawScrub(svg) {
-  const b = (hx.data && hx.data.buckets) || [];
-  const sc = hx.scrub != null && b[hx.scrub];
-  const g = svg.querySelector(".scrubg");
-  const read = svg.closest(".hbody").querySelector(".hread");
-  if (!sc || !hxGeo) { if (g) g.innerHTML = ""; return; }
-  const { show, isRain } = hxShow;
-  const { x, y, conv, step, bw } = hxGeo;
-  const cx = isRain ? x(sc.t) + bw / 2 : x(sc.t + step / 2);
-  g.innerHTML = `<line class="hscrub" x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${hxGeo.top}" y2="${hxGeo.top + hxGeo.H}"/>` +
-    (isRain ? "" : `<circle class="hsdot" cx="${cx.toFixed(1)}" cy="${y(conv(sc.avg)).toFixed(1)}" r="4"/>`);
-  read.className = "hread";
-  read.innerHTML = `<b>${show(isRain ? sc.sum : sc.avg)}</b><span>${esc(whenLabel(sc.t, hx.data.step))}${!isRain && sc.n > 1 && sc.max !== sc.min ? ` · ${show(sc.min)} to ${show(sc.max)}` : ""}</span>`;
 }
 
 // Rain reads best as totals people think in: per hour for a day, per day for a week or a
@@ -444,13 +346,6 @@ function rainTotals(data) {
   return { ...data, step, buckets };
 }
 
-function pickSensor(id) {
-  const s = homeHere() || state.home.station;
-  hx.sensor = (s.readings || []).find((x) => x.id === id) || hx.sensor;
-  hx.scrub = null;
-  fetchHistory();
-}
-
 function stepRange(dir) {
   const n = { day: 1, week: 7, year: 365 }[hx.span];
   if (hx.span === "month") { const d = new Date(hx.anchor); d.setDate(1); d.setMonth(d.getMonth() + dir); hx.anchor = d.getTime(); }
@@ -459,9 +354,6 @@ function stepRange(dir) {
   hx.scrub = null;
   fetchHistory();
 }
-
-function isoDay(t) { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
-function parseDay(v) { const [y, m, d] = String(v).split("-").map(Number); return new Date(y, m - 1, d).getTime(); }
 
 function whenLabel(t, step) {
   const d = new Date(t);
@@ -472,56 +364,6 @@ function whenLabel(t, step) {
   return step >= 3600e3 ? `${day}, ${hm(t)}–${hm(t + step)}` : `${day}, ${hm(t)}`;
 }
 
-function histChart(b, data, isRain, conv, U, r) {
-  const W = 340, H = 150, top = 8, left = 34, bottom = 22, iw = W - left - 4;
-  const from = data.from, to = Math.max(data.to, from + 1);
-  const span = to - from;
-  const x = (t) => left + ((t - from) / span) * iw;
-  const vals = isRain ? b.map((p) => conv(p.sum)) : b.flatMap((p) => [conv(p.min), conv(p.max)]);
-  let lo = isRain ? 0 : Math.min(...vals), hi = Math.max(...vals);
-  if (hi - lo < 1e-9) { hi += 1; lo -= isRain ? 0 : 1; }
-  const pad = (hi - lo) * 0.08;
-  if (!isRain) lo -= pad;
-  hi += pad;
-  const y = (v) => top + (1 - (v - lo) / (hi - lo)) * H;
-  // Three tidy gridlines.
-  const ticks = niceTicks(lo, hi, 3);
-  let g = ticks.map((v) => `<line class="grid" x1="${left}" x2="${W - 4}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/><text class="yl" x="${left - 6}" y="${(y(v) + 3.5).toFixed(1)}">${fmtTick(v)}</text>`).join("");
-  // Time labels.
-  const step = data.step || 3600e3;
-  const xt = timeTicks(from, to);
-  g += xt.map((t) => `<text class="xl" x="${x(t.t).toFixed(1)}" y="${top + H + 16}">${esc(t.label)}</text>`).join("");
-  if (isRain) {
-    const bw = Math.max(1, (step / span) * iw - 1.5);
-    g += b.map((p) => {
-      const v = conv(p.sum);
-      if (v <= 0) return "";
-      const h = Math.max(1.5, y(lo) - y(v));
-      return `<rect class="rb" x="${x(p.t).toFixed(1)}" y="${(y(lo) - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="${Math.min(2, bw / 2).toFixed(1)}"/>`;
-    }).join("");
-  } else {
-    // Gaps in the data break the line rather than joining across them.
-    const runs = [];
-    let run = [];
-    b.forEach((p, i) => { if (i && p.t - b[i - 1].t > step * 2.5) { runs.push(run); run = []; } run.push(p); });
-    runs.push(run);
-    const mid = (p) => p.t + step / 2;
-    for (const rr of runs) {
-      if (rr.some((p) => p.max !== p.min)) {
-        const up = rr.map((p) => `${x(mid(p)).toFixed(1)},${y(conv(p.max)).toFixed(1)}`);
-        const dn = rr.slice().reverse().map((p) => `${x(mid(p)).toFixed(1)},${y(conv(p.min)).toFixed(1)}`);
-        g += `<polygon class="band k-${r.kind || "x"}" points="${up.concat(dn).join(" ")}"/>`;
-      }
-      g += rr.length > 1
-        ? `<polyline class="ln k-${r.kind || "x"}" points="${rr.map((p) => `${x(mid(p)).toFixed(1)},${y(conv(p.avg)).toFixed(1)}`).join(" ")}"/>`
-        : `<circle class="dot k-${r.kind || "x"}" cx="${x(mid(rr[0])).toFixed(1)}" cy="${y(conv(rr[0].avg)).toFixed(1)}" r="2.5"/>`;
-    }
-  }
-  hxGeo = { x, y, conv, step, top, H, bw: Math.max(1, (step / span) * iw - 1.5) };
-  g += `<g class="scrubg"></g>`;
-  return `<svg class="hsvg chart" viewBox="0 0 ${W} ${top + H + bottom}" data-left="${left}" data-iw="${iw}" data-from="${from}" data-span="${span}" role="img" aria-label="${esc(sensorName(r))} chart">${g}</svg>`;
-}
-
 function niceTicks(lo, hi, n) {
   const raw = (hi - lo) / n;
   const mag = 10 ** Math.floor(Math.log10(raw));
@@ -530,7 +372,6 @@ function niceTicks(lo, hi, n) {
   for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(Math.round(v * 1e6) / 1e6);
   return out;
 }
-function fmtTick(v) { return Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : String(Math.round(v * 10) / 10); }
 
 function timeTicks(from, to) {
   const span = to - from;
@@ -558,6 +399,287 @@ function timeTicks(from, to) {
   return out;
 }
 
+
+
+function homeReadings() {
+  const s = homeHere() || (state.home && state.home.station);
+  return (s && s.readings) || [];
+}
+
+// Favourites first (in the order you pinned them), then the main sensors, then the rest.
+function orderedSensors(all) {
+  const favs = homeFavs(all);
+  const fav = favs.map((k) => all.find((r) => favKey(r) === k)).filter(Boolean);
+  const main = all.filter((r) => !fav.includes(r) && r.kind && r.main);
+  const rest = all.filter((r) => !fav.includes(r) && !main.includes(r)).sort((a, b) => sensorName(a, all).localeCompare(sensorName(b, all)));
+  return { fav, others: [...main, ...rest] };
+}
+
+const isWind = (r) => r && (r.kind === "wind" || r.kind === "gust" || r.kind === "dir");
+const mainOf = (all, kind) => all.find((r) => r.kind === kind && r.main);
+
+// Wind charts need the direction and the speed together, so fetch both even if only one is picked.
+function idsToFetch(all) {
+  const ids = new Set(hx.ids);
+  if (hx.ids.some((id) => isWind(all.find((r) => r.id === id)))) {
+    for (const k of ["dir", "wind", "gust"]) { const m = mainOf(all, k); if (m) ids.add(m.id); }
+  }
+  return [...ids];
+}
+
+function openHistory(id) {
+  const s = homeHere() || (state.home && state.home.station);
+  if (!s) return;
+  const all = s.readings || [];
+  if (!all.length) return;
+  if (id && all.some((r) => r.id === id)) hx.ids = [id];
+  else if (!hx.ids.length || !hx.ids.every((x) => all.some((r) => r.id === x))) {
+    const first = orderedSensors(all).fav[0] || mainOf(all, "temp") || all[0];
+    hx.ids = [first.id];
+  }
+  if (hx.anchor == null) hx.anchor = Date.now();
+  if (hx.from == null) { hx.to = Date.now(); hx.from = addDays(Date.now(), -6); }
+  hx.scrub = null;
+  hx.picking = false;
+  const sheet = $("#histSheet");
+  sheet.querySelector("h2").textContent = s.name;
+  drawHistory();
+  if (!sheet.open) sheet.showModal();
+  fetchHistory();
+}
+
+async function fetchHistory() {
+  const { from, to } = histRange();
+  const all = homeReadings();
+  const ids = idsToFetch(all);
+  const req = ++hx.req;
+  hx.error = null;
+  hx.scrub = null;
+  // Reuse whatever is already fetched for this range; only ask for the rest.
+  const have = {}, need = [];
+  for (const id of ids) {
+    const c = histCache.get(`${id}/${from}/${to}`);
+    if (c) have[id] = c; else need.push(id);
+  }
+  if (!need.length) { hx.data = have; hx.loading = false; drawHistory(); return; }
+  hx.loading = true;
+  drawHistory();
+  try {
+    const q = new URLSearchParams({ from, to, ids: need.join(","), offset: -new Date(from).getTimezoneOffset() });
+    const body = await api(`/api/home/history?${q}`);
+    for (const id of need) {
+      const r = all.find((x) => x.id === id);
+      const sr = body.series && body.series[id];
+      let d = sr ? { ...sr, from, to } : { buckets: [], from, to };
+      if (r && r.kind === "rain" && d.buckets.length) d = rainTotals(d);
+      histCache.set(`${id}/${from}/${to}`, d);
+      have[id] = d;
+    }
+    if (req !== hx.req) return;
+    hx.data = have;
+  } catch (err) {
+    if (req !== hx.req) return;
+    hx.error = err.message;
+  }
+  hx.loading = false;
+  drawHistory();
+}
+
+function drawHistory() {
+  const sheet = $("#histSheet");
+  const all = homeReadings();
+  if (!sheet || !all.length) return;
+  const picked = hx.ids.map((id) => all.find((r) => r.id === id)).filter(Boolean);
+
+  // What to show: the picked sensors as pills, and a tidy list to add or remove more.
+  const pills = picked.map((r) => `<span class="hpill k-${r.kind || "x"}"><i></i>${esc(sensorName(r, all))}${picked.length > 1 ? `<button data-drop="${esc(r.id)}" aria-label="Remove ${esc(sensorName(r, all))}">${ICON_X}</button>` : ""}</span>`).join("");
+  const add = `<button class="hpill add${hx.picking ? " on" : ""}" data-pick aria-expanded="${hx.picking}">${hx.picking ? "Done" : `${ICON_PLUS}Add`}</button>`;
+  let picker = "";
+  if (hx.picking) {
+    const { fav, others } = orderedSensors(all);
+    const full = picked.length >= MAX_PICK;
+    const row = (r) => {
+      const on = hx.ids.includes(r.id);
+      return `<button class="prow${on ? " on" : ""}" data-toggle="${esc(r.id)}" ${!on && full ? "disabled" : ""} role="checkbox" aria-checked="${on}">
+        <span class="tick">${ICON_TICK}</span><span class="pn">${esc(sensorName(r, all))}</span><span class="pv">${esc(sensorValue(r))}</span></button>`;
+    };
+    picker = `<div class="hpicker">
+      <p class="how">Show up to ${MAX_PICK} at once.${full ? " Remove one to add another." : ""}</p>
+      ${fav.length ? `<h4>${STAR_ICON}Favourites</h4>${fav.map(row).join("")}` : ""}
+      <h4>${fav.length ? "Everything else" : "Sensors"}</h4>${others.map(row).join("")}
+    </div>`;
+  }
+
+  const spans = [["day", "Day"], ["week", "Week"], ["month", "Month"], ["year", "Year"], ["custom", "Custom"]];
+  const seg = spans.map(([v, l]) => `<button data-span="${v}" aria-pressed="${hx.span === v}">${l}</button>`).join("");
+  const { end } = histRange();
+  const atEnd = end > Date.now();
+  const nav = hx.span === "custom"
+    ? `<div class="hcustom"><label>From<input type="date" id="hFrom" value="${isoDay(hx.from)}" max="${isoDay(Date.now())}"></label><label>To<input type="date" id="hTo" value="${isoDay(hx.to)}" max="${isoDay(Date.now())}"></label></div>`
+    : `<div class="hnav"><button data-step="-1" aria-label="Earlier">${CHEV}</button>
+        <label class="hlabel"><span>${esc(histLabel())}</span><input type="date" id="hPick" value="${isoDay(hx.anchor)}" max="${isoDay(Date.now())}" aria-label="Pick a date"></label>
+        <button data-step="1" aria-label="Later"${atEnd ? " disabled" : ""}>${CHEV}</button></div>`;
+
+  let blocks;
+  if (hx.loading) blocks = picked.map((r) => `<section class="hblock"><div class="hbhead"><b>${esc(sensorName(r, all))}</b></div><div class="hchart sk-chart" aria-busy="true"><span class="sk"></span></div></section>`).join("");
+  else if (hx.error) blocks = `<div class="hchart hmsg">${esc(hx.error)}</div>`;
+  else blocks = picked.map((r) => histBlock(r, all)).join("");
+  const anyLine = !hx.loading && !hx.error && picked.some((r) => !roseFor(r, all));
+  const readout = `<div class="hread idle"><span>${anyLine ? "Touch a chart to read the values" : "&nbsp;"}</span></div>`;
+
+  const body = sheet.querySelector(".hbody");
+  body.innerHTML = `
+    <div class="hpills">${pills}${add}</div>
+    ${picker}
+    <div class="hseg" role="group" aria-label="Range">${seg}</div>
+    ${nav}
+    ${readout}
+    <div class="hblocks">${blocks}</div>`;
+
+  // Wiring.
+  body.querySelector("[data-pick]").onclick = () => { hx.picking = !hx.picking; drawHistory(); };
+  body.querySelectorAll("[data-drop]").forEach((b) => (b.onclick = () => { hx.ids = hx.ids.filter((x) => x !== b.dataset.drop); fetchHistory(); }));
+  body.querySelectorAll("[data-toggle]").forEach((b) => (b.onclick = () => {
+    const id = b.dataset.toggle;
+    if (hx.ids.includes(id)) { if (hx.ids.length > 1) hx.ids = hx.ids.filter((x) => x !== id); }
+    else if (hx.ids.length < MAX_PICK) hx.ids = [...hx.ids, id];
+    fetchHistory();
+  }));
+  body.querySelectorAll("[data-span]").forEach((x) => (x.onclick = () => { hx.span = x.dataset.span; if (hx.span !== "custom") hx.anchor = Math.min(hx.anchor, Date.now()); fetchHistory(); }));
+  body.querySelectorAll("[data-step]").forEach((x) => (x.onclick = () => stepRange(Number(x.dataset.step))));
+  const pick = body.querySelector("#hPick");
+  if (pick) {
+    pick.onchange = () => { if (pick.value) { hx.anchor = parseDay(pick.value); fetchHistory(); } };
+    body.querySelector(".hlabel span").onclick = () => { try { pick.showPicker(); } catch { pick.focus(); } };
+  }
+  const f = body.querySelector("#hFrom"), t = body.querySelector("#hTo");
+  if (f && t) {
+    const go = () => {
+      let a = parseDay(f.value), z = parseDay(t.value);
+      if (!isFinite(a) || !isFinite(z)) return;
+      if (a > z) [a, z] = [z, a];
+      if (z - a > 365 * DAY) a = addDays(z, -365);
+      hx.from = a; hx.to = z; fetchHistory();
+    };
+    f.onchange = go; t.onchange = go;
+  }
+  body.querySelectorAll("svg.hsvg").forEach(wireScrub);
+  body.querySelectorAll("[data-petal]").forEach((p) => (p.onclick = () => {
+    const id = p.closest(".hblock").dataset.id;
+    hx.rose[id] = hx.rose[id] === Number(p.dataset.petal) ? null : Number(p.dataset.petal);
+    drawHistory();
+  }));
+}
+
+// ---------- One sensor's chart ----------
+
+const geos = new Map(); // sensor id -> how to place its values, for reading them together
+
+function roseFor(r, all) {
+  if (!isWind(r) || !hx.data) return null;
+  const dir = mainOf(all, "dir");
+  const speed = r.kind === "dir" ? mainOf(all, "wind") : r;
+  const ds = dir && hx.data[dir.id], ss = speed && hx.data[speed.id];
+  if (!ds || !ss || !ds.buckets.length || !ss.buckets.length) return null;
+  return { dir: ds, speed: ss, speedSensor: speed };
+}
+
+function histBlock(r, all) {
+  const name = esc(sensorName(r, all));
+  const rose = roseFor(r, all);
+  if (rose) return `<section class="hblock" data-id="${esc(r.id)}"><div class="hbhead"><b>${name}</b><span class="hval"></span></div>${windRose(r, rose, all)}</section>`;
+  const d = hx.data && hx.data[r.id];
+  const b = (d && d.buckets) || [];
+  if (!b.length) return `<section class="hblock" data-id="${esc(r.id)}"><div class="hbhead"><b>${name}</b></div><div class="hchart hmsg">No readings in this range.</div></section>`;
+  const U = histUnit(r);
+  const show = (v) => (v == null ? "–" : `${(Math.round(U.f(v) * 10 ** U.dp) / 10 ** U.dp).toLocaleString()}${U.u}`);
+  const isRain = r.kind === "rain";
+  return `<section class="hblock" data-id="${esc(r.id)}"><div class="hbhead"><b>${name}</b><span class="hval"></span></div>
+    ${lineChart(r, d, U)}${histStats(b, isRain, show, d.step)}</section>`;
+}
+
+// Warmth colours for temperature lines, in °C.
+const WARMTH = [[-10, "#5b7fd6"], [0, "#5fb0d9"], [8, "#58b89a"], [14, "#e8c25a"], [20, "#ec9a45"], [28, "#d9534f"]];
+function warmth(c) {
+  if (c <= WARMTH[0][0]) return WARMTH[0][1];
+  for (let i = 1; i < WARMTH.length; i++) if (c <= WARMTH[i][0]) return WARMTH[i - 1][1] + "|" + WARMTH[i][1] + "|" + (c - WARMTH[i - 1][0]) / (WARMTH[i][0] - WARMTH[i - 1][0]);
+  return WARMTH[WARMTH.length - 1][1];
+}
+function mix(c) {
+  const w = warmth(c);
+  if (!w.includes("|")) return w;
+  const [a, b, f] = w.split("|");
+  const h = (x) => [1, 3, 5].map((i) => parseInt(x.slice(i, i + 2), 16));
+  const A = h(a), B = h(b), t = Number(f);
+  return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * t)).join(",")})`;
+}
+
+const isSun = (r) => /^slr|solar|^sr0|^sw_?in|^rad|^par/i.test(r.field || "") && !/mj/i.test(r.field || "");
+
+function lineChart(r, data, U) {
+  const W = 340, H = 120, top = 8, left = 34, bottom = 22, iw = W - left - 4;
+  const b = data.buckets;
+  const isRain = r.kind === "rain";
+  const conv = U.f;
+  const from = data.from, to = Math.max(data.to, from + 1);
+  const span = to - from;
+  const x = (t) => left + ((t - from) / span) * iw;
+  const step = data.step || 3600e3;
+  const vals = isRain ? b.map((p) => conv(p.sum)) : b.flatMap((p) => [conv(p.min), conv(p.max)]);
+  let lo = isRain || isSun(r) ? 0 : Math.min(...vals), hi = Math.max(...vals);
+  if (r.kind === "humidity") { lo = Math.max(0, Math.min(lo, 40)); hi = Math.min(100, Math.max(hi, 100)); }
+  if (hi - lo < 1e-9) { hi += 1; lo -= isRain ? 0 : 1; }
+  const pad = (hi - lo) * 0.08;
+  if (!isRain && !isSun(r) && r.kind !== "humidity") lo -= pad;
+  if (r.kind !== "humidity") hi += pad;
+  const y = (v) => top + (1 - (v - lo) / (hi - lo)) * H;
+  const ticks = niceTicks(lo, hi, 3);
+  let defs = "";
+  let g = ticks.map((v) => `<line class="grid" x1="${left}" x2="${W - 4}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/><text class="yl" x="${left - 6}" y="${(y(v) + 3.5).toFixed(1)}">${fmtTick(v)}</text>`).join("");
+  g += timeTicks(from, to).map((t) => `<text class="xl" x="${x(t.t).toFixed(1)}" y="${top + H + 16}">${esc(t.label)}</text>`).join("");
+  const bw = Math.max(1, (step / span) * iw - 1.5);
+  const gid = `g${r.id.replace(/[^a-z0-9]/gi, "")}`;
+  if (isRain) {
+    g += b.map((p) => {
+      const v = conv(p.sum);
+      if (v <= 0) return "";
+      const h = Math.max(1.5, y(lo) - y(v));
+      return `<rect class="rb" x="${x(p.t).toFixed(1)}" y="${(y(lo) - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="${Math.min(2, bw / 2).toFixed(1)}"/>`;
+    }).join("");
+  } else {
+    // Temperature: the line takes the colour of the warmth at each height.
+    const isTemp = r.kind === "temp" || histUnit(r).u === "°" && /c$/i.test(r.unit || "");
+    if (isTemp) {
+      const toC = (v) => (state.settings.temp === "F" ? (v - 32) * 5 / 9 : v);
+      const stops = Array.from({ length: 9 }, (_, i) => { const v = hi - ((hi - lo) * i) / 8; return `<stop offset="${(i / 8).toFixed(3)}" stop-color="${mix(toC(v))}"/>`; }).join("");
+      defs += `<linearGradient id="${gid}" gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="${top}" y2="${top + H}">${stops}</linearGradient>`;
+    }
+    if (isSun(r)) defs += `<linearGradient id="${gid}s" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#f2b93b" stop-opacity="0.55"/><stop offset="1" stop-color="#f2b93b" stop-opacity="0.04"/></linearGradient>`;
+    const runs = [];
+    let run = [];
+    b.forEach((p, i) => { if (i && p.t - b[i - 1].t > step * 2.5) { runs.push(run); run = []; } run.push(p); });
+    runs.push(run);
+    const mid = (p) => p.t + step / 2;
+    const stroke = isTemp ? ` style="stroke:url(#${gid})"` : "";
+    for (const rr of runs) {
+      const line = rr.map((p) => `${x(mid(p)).toFixed(1)},${y(conv(p.avg)).toFixed(1)}`);
+      if (isSun(r)) {
+        g += `<polygon fill="url(#${gid}s)" points="${x(mid(rr[0])).toFixed(1)},${y(lo).toFixed(1)} ${line.join(" ")} ${x(mid(rr[rr.length - 1])).toFixed(1)},${y(lo).toFixed(1)}"/>`;
+      } else if (rr.some((p) => p.max !== p.min)) {
+        const up = rr.map((p) => `${x(mid(p)).toFixed(1)},${y(conv(p.max)).toFixed(1)}`);
+        const dn = rr.slice().reverse().map((p) => `${x(mid(p)).toFixed(1)},${y(conv(p.min)).toFixed(1)}`);
+        g += `<polygon class="band k-${r.kind || "x"}"${isTemp ? ` style="fill:url(#${gid})"` : ""} points="${up.concat(dn).join(" ")}"/>`;
+      }
+      g += rr.length > 1
+        ? `<polyline class="ln k-${r.kind || "x"}${isSun(r) ? " sun" : ""}"${stroke} points="${line.join(" ")}"/>`
+        : `<circle class="dot k-${r.kind || "x"}" cx="${x(mid(rr[0])).toFixed(1)}" cy="${y(conv(rr[0].avg)).toFixed(1)}" r="2.5"/>`;
+    }
+  }
+  geos.set(r.id, { x, y, conv, step, top, H, bw, isRain, b, U });
+  g += `<g class="scrubg"></g>`;
+  return `<svg class="hsvg chart" viewBox="0 0 ${W} ${top + H + bottom}" data-id="${esc(r.id)}" data-left="${left}" data-iw="${iw}" data-from="${from}" data-span="${span}" role="img" aria-label="${esc(sensorName(r))} chart"><defs>${defs}</defs>${g}</svg>`;
+}
+
 function histStats(b, isRain, show, step) {
   const tile = (l, v, sub) => `<div class="mc"><small>${l}</small><b>${v}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div>`;
   if (isRain) {
@@ -575,6 +697,84 @@ function histStats(b, isRain, show, step) {
   return `<div class="mine-grid hstats three">${tile("Highest", show(hi.max), whenLabel(hi.t, step))}${tile("Lowest", show(lo.min), whenLabel(lo.t, step))}${tile("Average", show(avg))}</div>`;
 }
 
+// ---------- Wind: the compass is the chart ----------
+// Each petal points to where the wind came from. Its length is how much of the time it blew
+// from there; its rings of colour are how strong it was.
+
+const SPEED_BANDS = [8, 16, 32, 48]; // km/h edges: light, moderate, fresh, strong, gale
+const POINTS16 = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+
+function windRose(r, rose, all) {
+  // Pair each time step's direction with its speed.
+  const sp = new Map(rose.speed.buckets.map((p) => [p.t, p]));
+  const pairs = [];
+  for (const d of rose.dir.buckets) {
+    const s = sp.get(d.t);
+    if (s) pairs.push({ dir: d.avg, speed: s.avg, max: s.max, w: s.n || 1, t: d.t });
+  }
+  if (!pairs.length) return `<div class="hchart hmsg">No wind readings in this range.</div>`;
+  const total = pairs.reduce((a, p) => a + p.w, 0);
+  const calmW = pairs.filter((p) => p.speed < 2).reduce((a, p) => a + p.w, 0);
+  const petals = Array.from({ length: 16 }, () => [0, 0, 0, 0, 0]);
+  const sums = Array(16).fill(0), speedSum = Array(16).fill(0);
+  for (const p of pairs) {
+    if (p.speed < 2) continue;
+    const i = Math.round((((p.dir % 360) + 360) % 360) / 22.5) % 16;
+    const band = SPEED_BANDS.findIndex((e) => p.speed < e);
+    petals[i][band < 0 ? 4 : band] += p.w;
+    sums[i] += p.w; speedSum[i] += p.speed * p.w;
+  }
+  const maxShare = Math.max(...sums) / total || 1;
+  const C = 150, R0 = 16, R = 118;
+  const rad = (share) => R0 + (R - R0) * Math.sqrt(share / maxShare); // area-true petals
+  const pt = (deg, r) => { const a = ((deg - 90) * Math.PI) / 180; return `${(C + r * Math.cos(a)).toFixed(1)},${(C + r * Math.sin(a)).toFixed(1)}`; };
+  const wedge = (i, r1, r2) => {
+    const a1 = i * 22.5 - 9, a2 = i * 22.5 + 9;
+    return `M${pt(a1, r1)} L${pt(a1, r2)} A${r2},${r2} 0 0 1 ${pt(a2, r2)} L${pt(a2, r1)} A${r1},${r1} 0 0 0 ${pt(a1, r1)}Z`;
+  };
+  const sel = hx.rose[r.id];
+  let g = "";
+  // Rings: share of the time.
+  const ringShares = niceTicks(0, maxShare * 100, 4).filter((v) => v > 0).map((v) => v / 100);
+  g += ringShares.map((s) => `<circle class="rring" cx="${C}" cy="${C}" r="${rad(s).toFixed(1)}"/><text class="rl" x="${C + 3}" y="${(C - rad(s) - 2).toFixed(1)}">${Math.round(s * 100)}%</text>`).join("");
+  g += ["N", "E", "S", "W"].map((l, i) => { const [px, py] = pt(i * 90, R + 16).split(","); return `<text class="rc" x="${px}" y="${(+py + 4).toFixed(1)}">${l}</text>`; }).join("");
+  for (let i = 0; i < 16; i++) {
+    if (!sums[i]) continue;
+    let cum = 0, inner = R0;
+    const dim = sel != null && sel !== i;
+    for (let k = 0; k < 5; k++) {
+      if (!petals[i][k]) continue;
+      cum += petals[i][k];
+      const outer = rad(cum / total);
+      g += `<path class="rp b${k}${dim ? " dim" : ""}" d="${wedge(i, inner, outer)}"/>`;
+      inner = outer;
+    }
+    g += `<path class="rhit" data-petal="${i}" d="${wedge(i, 0, Math.max(inner, 40))}"><title>From ${POINTS16[i]}</title></path>`;
+  }
+  g += `<circle class="rcalm" cx="${C}" cy="${C}" r="${R0 - 2}"/><text class="rcalmt" x="${C}" y="${C + 3.5}">${Math.round((calmW / total) * 100)}%</text>`;
+
+  const U = histUnit(rose.speedSensor);
+  const show = (v) => `${Math.round(U.f(v))}${U.u}`;
+  const edge = (v) => Math.round(U.f(v));
+  const legend = [`under ${edge(8)}`, `${edge(8)}–${edge(16)}`, `${edge(16)}–${edge(32)}`, `${edge(32)}–${edge(48)}`, `over ${edge(48)}`]
+    .map((l, k) => `<span><i class="b${k}"></i>${l}</span>`).join("");
+  const top = sums.indexOf(Math.max(...sums));
+  const avg = pairs.reduce((a, p) => a + p.speed * p.w, 0) / total;
+  const gustS = mainOf(all, "gust");
+  const gustB = gustS && hx.data[gustS.id] ? hx.data[gustS.id].buckets : [];
+  const strongest = gustB.length ? Math.max(...gustB.map((p) => p.max)) : Math.max(...pairs.map((p) => p.max));
+  const focus = sel != null && sums[sel]
+    ? `<p class="rfocus"><b>From ${POINTS16[sel]}</b> ${Math.round((sums[sel] / total) * 100)}% of the time, averaging ${show(speedSum[sel] / sums[sel])}</p>`
+    : `<p class="rfocus idle">Tap a petal to see that direction. The middle is how often it was calm.</p>`;
+  const tile = (l, v, sub) => `<div class="mc"><small>${l}</small><b>${v}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div>`;
+  return `<svg class="rose" viewBox="-12 -12 324 324" role="img" aria-label="Wind compass: how often and how strongly the wind came from each direction">${g}</svg>
+    <div class="rlegend"><span class="rlt">${esc(fmt.windUnit())}</span>${legend}</div>
+    ${focus}
+    <div class="mine-grid hstats three">${tile("Mostly from", POINTS16[top], `${Math.round((sums[top] / total) * 100)}% of the time`)}${tile("Average", show(avg))}${tile(gustB.length ? "Strongest gust" : "Strongest", show(strongest))}</div>`;
+}
+
+// ---------- Reading the charts together ----------
+
 function wireScrub(svg) {
   const pick = (e) => {
     const r = svg.getBoundingClientRect();
@@ -582,11 +782,36 @@ function wireScrub(svg) {
     const px = ((e.clientX - r.left) / r.width) * vb.width;
     const left = +svg.dataset.left, iw = +svg.dataset.iw, from = +svg.dataset.from, span = +svg.dataset.span;
     const t = from + ((px - left) / iw) * span;
-    const b = hx.data.buckets;
-    let best = 0, d = Infinity;
-    b.forEach((p, i) => { const dd = Math.abs(p.t + (hx.data.step || 0) / 2 - t); if (dd < d) { d = dd; best = i; } });
-    if (best !== hx.scrub) { hx.scrub = best; drawScrub(svg); }
+    if (t !== hx.scrub) { hx.scrub = t; drawScrubAll(); }
   };
   svg.addEventListener("pointerdown", (e) => { svg.setPointerCapture?.(e.pointerId); pick(e); });
   svg.addEventListener("pointermove", (e) => { if (e.buttons || e.pointerType === "mouse") pick(e); });
 }
+
+function drawScrubAll() {
+  const body = $("#histSheet .hbody");
+  if (!body || hx.scrub == null) return;
+  let when = null;
+  body.querySelectorAll("svg.hsvg").forEach((svg) => {
+    const geo = geos.get(svg.dataset.id);
+    const g = svg.querySelector(".scrubg");
+    const val = svg.closest(".hblock").querySelector(".hval");
+    if (!geo || !geo.b.length) return;
+    const t = hx.scrub;
+    let best = 0, d = Infinity;
+    geo.b.forEach((p, i) => { const dd = Math.abs(p.t + geo.step / 2 - t); if (dd < d) { d = dd; best = i; } });
+    const sc = geo.b[best];
+    const cx = geo.isRain ? geo.x(sc.t) + geo.bw / 2 : geo.x(sc.t + geo.step / 2);
+    g.innerHTML = `<line class="hscrub" x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${geo.top}" y2="${geo.top + geo.H}"/>` +
+      (geo.isRain ? "" : `<circle class="hsdot" cx="${cx.toFixed(1)}" cy="${geo.y(geo.conv(sc.avg)).toFixed(1)}" r="4"/>`);
+    const show = (v) => `${(Math.round(geo.U.f(v) * 10 ** geo.U.dp) / 10 ** geo.U.dp).toLocaleString()}${geo.U.u}`;
+    val.innerHTML = `<b>${show(geo.isRain ? sc.sum : sc.avg)}</b>${!geo.isRain && sc.n > 1 && sc.max !== sc.min ? ` <small>${show(sc.min)} to ${show(sc.max)}</small>` : ""}`;
+    if (!when) when = whenLabel(sc.t, geo.step);
+  });
+  const read = body.querySelector(".hread");
+  if (read && when) { read.className = "hread"; read.innerHTML = `<span class="hwhen">${esc(when)}</span>`; }
+}
+
+const ICON_X = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4 4 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+const ICON_PLUS = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+const ICON_TICK = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
