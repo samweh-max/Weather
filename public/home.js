@@ -350,7 +350,8 @@ function homeCardHtml() {
   const all = s.readings || [];
   const favs = homeFavs(all);
   const tiles = favs.map((k) => all.find((r) => favKey(r) === k)).filter(Boolean).map((r) => homeTile(r, s, all)).join("");
-  const sorted = [...all].sort((a, b) => (b.main ? 1 : 0) - (a.main ? 1 : 0) || sensorName(a, all).localeCompare(sensorName(b, all)));
+  const sensors = all.filter((r) => !isHealth(r));
+  const sorted = [...sensors].sort((a, b) => (b.main ? 1 : 0) - (a.main ? 1 : 0) || sensorName(a, all).localeCompare(sensorName(b, all)));
   const rows = sorted.map((r) => {
     const k = favKey(r), on = favs.includes(k);
     return `<li><button class="sname" data-hist="${esc(r.id)}">${esc(sensorName(r, all))}</button><span class="sval">${esc(sensorValue(r))}</span>
@@ -361,12 +362,12 @@ function homeCardHtml() {
   const enter = homeCardEntered ? "" : " enter";
   homeCardEntered = true;
   return `<section class="panel mine-card${enter}">
-    <div class="mine-head"><div><span class="tag">My station</span><h2>${esc(s.name)}</h2><small>${s.dist >= 0.5 ? fmt.dist(s.dist) + " · " : ""}${when}</small></div>
+    <div class="mine-head"><div><div class="mine-tagrow"><span class="tag">My station</span>${healthPill(s)}</div><h2>${esc(s.name)}</h2><small>${s.dist >= 0.5 ? fmt.dist(s.dist) + " · " : ""}${when}</small></div>
       <button class="mine-t" data-hist="${esc((all.find((r) => r.kind === "temp" && r.main) || {}).id || "")}" aria-label="Temperature history">${s.temp != null ? fmt.temp(s.temp) : "–"}</button></div>
     ${tiles ? `<div class="mine-grid">${tiles}</div>` : `<p class="how">Star sensors below to pin them here.</p>`}
     ${s.hourly ? `<div class="gdetail">${rainTimeline(s.hourly)}</div>` : ""}
     <button class="hist-btn" data-hist="">${ICON_CAL}<span>History</span><small>any day or range</small>${CHEV}</button>
-    <details class="mine-all"${state.homeAllOpen ? " open" : ""}><summary>All sensors <small>${all.length}</small></summary>
+    <details class="mine-all"${state.homeAllOpen ? " open" : ""}><summary><span>All sensors <small>${sensors.length}</small></span><span class="sw"><span class="sw-show">Show</span><span class="sw-hide">Hide</span>${CHEV}</span></summary>
       <p class="how">Tap ☆ to pin a sensor to the card. Tap a name to see its history.</p><ul>${rows}</ul></details>
   </section>`;
 }
@@ -382,6 +383,8 @@ function homeCardWire(box) {
   const all = (homeHere() || {}).readings || [];
   card.querySelectorAll("[data-star]").forEach((b) => (b.onclick = () => { toggleFav(b.dataset.star, all); redrawHomeCard(box, `[data-star="${CSS.escape(b.dataset.star)}"]`); }));
   card.querySelectorAll("[data-hist]").forEach((b) => (b.onclick = () => openHistory(b.dataset.hist)));
+  const hb = card.querySelector("[data-health]");
+  if (hb) hb.onclick = () => openHealth();
   const d = card.querySelector(".mine-all");
   if (d) d.ontoggle = () => (state.homeAllOpen = d.open);
 }
@@ -965,3 +968,152 @@ function drawScrubAll() {
 const ICON_X = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4 4 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
 const ICON_PLUS = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
 const ICON_TICK = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+// ---------- Station health ----------
+// Everything the logger says about itself: its batteries, its own temperature, errors and
+// skipped measurements, free storage, how long each scan takes, its outputs and record counts.
+// Each is named in plain words and, where there is a sensible range, marked good or worth a look.
+
+const usec = (v) => (v >= 1e6 ? `${(v / 1e6).toFixed(2)} s` : `${Math.round(v / 1000)} ms`);
+function bytes(v) {
+  if (v >= 1e9) return `${(v / 1e9).toFixed(1)} GB`;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1)} MB`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1)} KB`;
+  return `${Math.round(v)} bytes`;
+}
+const portNo = (f) => (/\((\d+)\)/.exec(f) || [])[1] || "";
+const zeroGood = (bad = "bad") => (v) => (v === 0 ? ["good", "None"] : [bad, v.toLocaleString()]);
+const HEALTH = [
+  { re: /^battery$|^battv/i, group: "Power", name: (r) => /min/i.test(r.field) ? `Battery, lowest ${tableWords(r.table) === "daily" ? "today" : tableWords(r.table)}` : /avg/i.test(r.field) ? `Battery, average ${tableWords(r.table)}` : "Battery",
+    show: (v) => `${v.toFixed(2)} V`, judge: (v) => (v >= 12.4 ? ["good", "Good"] : v >= 11.9 ? ["warn", "Getting low"] : ["bad", "Low"]), hint: "A healthy 12 V battery sits above 12.4 V." },
+  { re: /lithium/i, group: "Power", name: () => "Backup battery", show: (v) => `${v.toFixed(2)} V`, judge: (v) => (v >= 2.7 ? ["good", "Good"] : ["warn", "Replace soon"]), hint: "Keeps the clock and memory going if the main power drops." },
+  { re: /^sw12volts/i, group: "Power", name: (r) => `Switched 12 V output${portNo(r.field) ? " " + portNo(r.field) : ""}`, show: (v) => (v > 0.5 ? `On, ${v.toFixed(1)} V` : "Off") },
+  { re: /^paneltemp|^ptemp/i, group: "Logger", name: (r) => /avg/i.test(r.field) && r.table && !/status/i.test(r.table) ? `Inside the logger, ${tableWords(r.table)}` : "Inside the logger", show: (v) => fmt.temp(v),
+    judge: (v) => (v > -25 && v < 50 ? ["good", ""] : ["warn", "Outside its rated range"]) },
+  { re: /progerrors/i, group: "Logger", name: () => "Program errors", show: (v) => v.toLocaleString(), judge: zeroGood("bad") },
+  { re: /varoutofbound/i, group: "Logger", name: () => "Values out of range", show: (v) => v.toLocaleString(), judge: zeroGood("warn") },
+  { re: /skippedscan/i, group: "Logger", name: () => "Skipped measurements", show: (v) => v.toLocaleString(), judge: zeroGood("warn"), hint: "Times the logger was too busy to take a scheduled reading." },
+  { re: /wsdiag|diag/i, group: "Logger", name: () => "Wind sensor check", show: (v) => (v === 0 ? "OK" : `Code ${v}`), judge: (v) => (v === 0 ? ["good", ""] : ["warn", "Sensor reported a fault"]) },
+  { re: /datastoragefree/i, group: "Storage", name: () => "Data storage free", show: bytes },
+  { re: /cpudrivefree/i, group: "Storage", name: () => "Program drive free", show: bytes },
+  { re: /memoryfree/i, group: "Storage", name: () => "Working memory free", show: bytes },
+  { re: /^measuretime/i, group: "Timing", name: () => "Taking measurements", show: usec, hint: "How long each scan spends reading the sensors." },
+  { re: /^processtime/i, group: "Timing", name: () => "Processing them", show: usec },
+  { re: /^maxproctime/i, group: "Timing", name: () => "Longest processing", show: usec },
+  { re: /^portstatus/i, group: "Outputs", name: (r) => `Control port${portNo(r.field) ? " " + portNo(r.field) : ""}`, show: (v) => (v ? "On" : "Off") },
+  { re: /^record$/i, group: "Records", name: (r) => `${tableWords(r.table).replace(/^./, (c) => c.toUpperCase())} table`, show: (v) => `${v.toLocaleString()} saved` },
+];
+const HEALTH_GROUPS = ["Power", "Logger", "Sending", "Storage", "Timing", "Outputs", "Records", "Other"];
+
+function healthRule(r) { return HEALTH.find((h) => h.re.test(r.field || "")); }
+function isHealth(r) {
+  return /status/i.test(r.table || "") || /^(record|batt|battery|ptemp|paneltemp|wsdiag|lithium)/i.test(r.field || "");
+}
+function healthItems(s) {
+  const out = [];
+  const health = (s.readings || []).filter(isHealth);
+  const hasStatus = (re) => health.some((x) => /status/i.test(x.table || "") && re.test(x.field));
+  for (const r of health) {
+    const rule = healthRule(r);
+    // The logger's battery and own temperature are logged in several tables too; the Status
+    // report already has them, so keep only the day's lowest battery from the others.
+    if (!/status/i.test(r.table || "")) {
+      if (/^batt/i.test(r.field) && hasStatus(/^battery$/i) && !(/min/i.test(r.field) && tableWords(r.table) === "daily")) continue;
+      if (/^ptemp/i.test(r.field) && hasStatus(/^paneltemp/i)) continue;
+    }
+    const v = r.value;
+    if (rule) {
+      const [state, note] = rule.judge ? rule.judge(v) : ["", ""];
+      const name = rule.name(r);
+      out.push({ r, group: rule.group, name, value: rule.show(v), state, note, hint: name === "Battery" || !/^batt/i.test(r.field) ? rule.hint : null });
+    } else {
+      out.push({ r, group: "Other", name: r.field.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2"), value: sensorValue(r), state: "" });
+    }
+  }
+  const last = Date.parse(s.sent || s.time);
+  if (isFinite(last)) {
+    const hm = (t) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    out.push({ group: "Sending", name: "Last sent", value: `${hm(last)} · ${ago(new Date(last).toISOString())}` });
+    if (s.every) {
+      const late = Date.now() > last + s.every + Math.max(15 * 60e3, s.every / 2);
+      out.push({ group: "Sending", name: "Sends every", value: s.every >= 3600e3 ? `${Math.round(s.every / 360e3) / 10} h` : `${Math.round(s.every / 60e3)} min` });
+      out.push({ group: "Sending", name: "Next batch", value: late ? "Late" : hm(last + s.every), state: late ? "warn" : "good", note: late ? "Hasn't arrived yet" : "" });
+    }
+  }
+  return out;
+}
+function healthSummary(items) {
+  const bad = items.filter((i) => i.state === "bad"), warn = items.filter((i) => i.state === "warn");
+  if (bad.length) return { state: "bad", text: bad.length === 1 ? `${bad[0].name}: ${bad[0].note || "needs a look"}` : `${bad.length} things need a look` };
+  if (warn.length) return { state: "warn", text: warn.length === 1 ? `${warn[0].name}: ${warn[0].note || "worth a look"}` : `${warn.length} things worth a look` };
+  return { state: "good", text: "All good" };
+}
+
+// The pill at the top of the card: a small dot in the health colour and the word Health.
+function healthPill(s) {
+  const items = healthItems(s);
+  if (!items.some((i) => i.r)) return "";
+  const sum = healthSummary(items);
+  return `<button class="health-pill h-${sum.state}" data-health aria-label="Station health: ${esc(sum.text)}"><i></i>Health${CHEV}</button>`;
+}
+
+const healthHist = { id: null, data: null, at: 0 };
+async function openHealth() {
+  const s = homeHere() || (state.home && state.home.station);
+  if (!s) return;
+  const sheet = $("#healthSheet");
+  sheet.querySelector("h2").textContent = s.name;
+  drawHealth(s);
+  if (!sheet.open) sheet.showModal();
+  // A week of the main battery, for the little chart.
+  const batt = (s.readings || []).find((r) => /^battery$/i.test(r.field)) || (s.readings || []).find((r) => /^battv/i.test(r.field));
+  if (!batt) return;
+  if (healthHist.id === batt.id && Date.now() - healthHist.at < 10 * 60e3) return;
+  try {
+    const to = Math.floor(Date.now() / 300e3) * 300e3, from = to - 7 * DAY;
+    const q = new URLSearchParams({ from, to, ids: batt.id, offset: -new Date().getTimezoneOffset() });
+    const body = await api(`/api/home/history?${q}`);
+    Object.assign(healthHist, { id: batt.id, data: body.series && body.series[batt.id], at: Date.now() });
+    if (sheet.open) drawHealth(s);
+  } catch {}
+}
+
+function battChart(d) {
+  const b = (d && d.buckets || []).filter((x) => x.avg != null);
+  if (b.length < 3) return "";
+  const W = 320, H = 70, lo = Math.min(12.1, ...b.map((x) => (x.min ?? x.avg) - 0.15)), hi = Math.max(13.8, ...b.map((x) => (x.max ?? x.avg) + 0.15));
+  const t0 = b[0].t, t1 = b[b.length - 1].t;
+  const x = (t) => ((t - t0) / Math.max(1, t1 - t0)) * W, y = (v) => H - 4 - ((v - lo) / (hi - lo)) * (H - 8);
+  const line = b.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)} ${y(p.avg).toFixed(1)}`).join("");
+  const band = b.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)} ${y(p.max ?? p.avg).toFixed(1)}`).join("") +
+    [...b].reverse().map((p) => `L${x(p.t).toFixed(1)} ${y(p.min ?? p.avg).toFixed(1)}`).join("") + "Z";
+  const ok = y(12.4);
+  return `<figure class="hbatt"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+      <rect x="0" y="${ok.toFixed(1)}" width="${W}" height="${(H - ok).toFixed(1)}" class="low"/>
+      <path d="${band}" class="band"/><path d="${line}" class="ln"/></svg>
+    <figcaption><span>7 days ago</span><span>Last week · shaded below 12.4 V</span><span>Now</span></figcaption></figure>`;
+}
+
+function drawHealth(s) {
+  const sheet = $("#healthSheet");
+  const items = healthItems(s);
+  const sum = healthSummary(items);
+  const batt = items.find((i) => i.r && /^battery$|^battv/i.test(i.r.field) && i.name === "Battery") || items.find((i) => i.group === "Power" && i.r);
+  const gauge = batt ? (() => {
+    const v = batt.r.value, f = Math.max(0, Math.min(1, (v - 11.5) / 3));
+    return `<div class="hgauge h-${batt.state}"><div class="hg-top"><span>Battery</span><b>${esc(batt.value)}</b></div>
+      <span class="hg-bar"><i style="width:${(f * 100).toFixed(1)}%"></i><em style="left:${(((12.4 - 11.5) / 3) * 100).toFixed(1)}%"></em></span>
+      <div class="hg-ends"><span>11.5 V</span><span>${esc(batt.note || "")}</span><span>14.5 V</span></div>
+      ${healthHist.data ? battChart(healthHist.data) : ""}</div>`;
+  })() : "";
+  const groups = HEALTH_GROUPS.map((g) => {
+    const rows = items.filter((i) => i.group === g);
+    if (!rows.length) return "";
+    return `<section class="hgroup"><h3>${g}</h3><ul>${rows.map((i) => `<li class="${i.state ? "h-" + i.state : ""}">
+        <span class="hn">${esc(i.name)}${i.note && i.state && i.state !== "good" ? `<small class="nt">${esc(i.note)}</small>` : ""}${i.hint ? `<small>${esc(i.hint)}</small>` : ""}</span>
+        <span class="hv">${i.state ? "<i></i>" : ""}${esc(i.value)}</span></li>`).join("")}</ul></section>`;
+  }).join("");
+  sheet.querySelector(".hbody").innerHTML = `
+    <div class="hsum h-${sum.state}"><span class="dot"></span><div><b>${esc(sum.text)}</b><small>From the logger's own report, ${esc(ago(s.sent || s.time))}</small></div></div>
+    ${gauge}${groups}`;
+}
