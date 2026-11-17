@@ -548,6 +548,8 @@ function homeReadings() {
 
 // Favourites first (in the order you pinned them), then the main sensors, then the rest.
 function orderedSensors(all) {
+  // Logger health readings live in Station Health, not in the History list.
+  all = all.filter((r) => !isHealth(r));
   const favs = homeFavs(all);
   const fav = favs.map((k) => all.find((r) => favKey(r) === k)).filter(Boolean);
   const main = all.filter((r) => !fav.includes(r) && r.kind && r.main);
@@ -573,7 +575,7 @@ function openHistory(id) {
   const all = s.readings || [];
   if (!all.length) return;
   if (id && all.some((r) => r.id === id)) hx.ids = [id];
-  else if (!hx.ids.length || !hx.ids.every((x) => all.some((r) => r.id === x))) {
+  else if (!hx.ids.length || !hx.ids.every((x) => all.some((r) => r.id === x && !isHealth(r)))) {
     const first = orderedSensors(all).fav[0] || mainOf(all, "temp") || all[0];
     hx.ids = [first.id];
   }
