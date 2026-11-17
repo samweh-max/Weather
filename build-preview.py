@@ -13,7 +13,7 @@ html = (root / "index.html").read_text()
 body = html.split("<!-- APP:START -->")[1].split("<!-- APP:END -->")[0]
 fonts = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..700&family=Geist:wght@400..700&display=swap">'
 land = (here / "preview-land.geojson").read_text()
-scripts = "".join(f"<script>\n{(root / name).read_text()}\n</script>\n" for name in ["blend.js", "map.js", "app.js"])
+scripts = "".join(f"<script>\n{(root / name).read_text()}\n</script>\n" for name in ["blend.js", "map.js", "home.js", "app.js"])
 out = f"""<title>Weather Compare</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 {fonts}

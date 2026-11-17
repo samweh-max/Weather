@@ -1,9 +1,12 @@
 // Your own weather station on CampbellON (Campbell Scientific's cloud, campbellon.com).
 //
-// Returns one station in the same shape as the other networks (see stations.js), with
-// network "home", plus a 24-hour hourly track used to check the forecasts:
+// /api/home returns one station in the same shape as the other networks (see stations.js),
+// with network "home", plus a 24-hour hourly track used to check the forecasts:
 //
-//   { station: {..., rain24h, hourly, readings}, history: { id, name, dist, obs: [{time, temp, wind}] } }
+//   { station: {..., rain24h, hourly, readings}, history: { id, name, dist, obs: [{time, temp, wind}] }, dist }
+//
+// /api/home/history returns chosen sensors between two dates (see homeHistory).
+// It is kept apart from /api/stations so the other stations never wait for it.
 //
 // Sign-in (set as Cloudflare secrets, never in the repo):
 //   CAMPBELL_CLIENT_ID + CAMPBELL_CLIENT_SECRET   a service account (best: keeps working with SSO)
@@ -14,8 +17,8 @@
 //   CAMPBELL_BASE         optional; defaults to https://campbellon.com
 //
 // CampbellON allows about 200 calls an hour, so everything is cached: the sign-in token until
-// it expires, the station and its list of sensors for hours, the latest readings for 5 minutes
-// and the 24-hour track for 15 minutes.
+// it expires, the station and its list of sensors for hours, and the reading itself for 5
+// minutes (an older copy is served at once while a new one is fetched behind it).
 
 import { distKm } from "./stations.js";
 
@@ -25,19 +28,58 @@ export function homeConfigured(env) {
   return !!(env.CAMPBELL_STATION_ID && ((env.CAMPBELL_CLIENT_ID && env.CAMPBELL_CLIENT_SECRET) || (env.CAMPBELL_USERNAME && env.CAMPBELL_PASSWORD)));
 }
 
-export async function homeStation({ lat, lon }, env, fetcher = fetch) {
+// The station near a place: the shared reading (see homeData) with the distance added.
+// Far from home it still answers, with `far` set, so the app can say how far away it is.
+export async function homeNear({ lat, lon }, env, ctx, fetcher = fetch) {
+  const data = await homeData(env, ctx, fetcher);
+  const s = data.station;
+  const dist = s.lat != null && s.lon != null ? round(distKm(lat, lon, s.lat, s.lon), 1) : 0;
+  return { ...data, station: { ...s, dist }, history: data.history ? { ...data.history, dist } : null, dist };
+}
+
+// Kept for older callers and tests: the station and its track, with the distance from a place.
+export async function homeStation(place, env, fetcher = fetch) {
+  const r = await homeNear(place, env, null, fetcher);
+  return { station: r.station, history: r.history };
+}
+
+const FRESH = 5 * MIN, KEEP = 3 * 24 * HOUR;
+
+// The station's reading, served from the last copy straight away. A copy older than five
+// minutes is still served, and a new one is fetched in the background for the next visit,
+// so opening the app never waits on CampbellON unless there is no copy at all.
+export async function homeData(env, ctx, fetcher = fetch) {
   const api = client(env, fetcher);
+  const key = new Request(`https://cache.weather/campbell/${encodeURIComponent(api.who || "")}/${env.CAMPBELL_STATION_ID}/result`);
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const hit = cache ? await cache.match(key).then((r) => r && r.json()).catch(() => null) : null;
+  const save = async () => {
+    const data = await readHome(api, env);
+    const body = { at: Date.now(), data };
+    if (cache) await cache.put(key, new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${KEEP / 1000}` } }));
+    return data;
+  };
+  if (hit && hit.data) {
+    const age = Date.now() - hit.at;
+    if (age < FRESH) return hit.data;
+    const refresh = save().catch(() => null);
+    if (ctx && ctx.waitUntil) { ctx.waitUntil(refresh); return { ...hit.data, stale: true }; }
+    return (await refresh) || { ...hit.data, stale: true };
+  }
+  return save();
+}
+
+async function readHome(api, env) {
   const sid = env.CAMPBELL_STATION_ID;
-  const org = env.CAMPBELL_ORG_ID || (await api.cached("org", 24 * HOUR, () => findOrg(api, sid)));
-  const meta = await api.cached(`station/${sid}`, 12 * HOUR, () => api.get(`/api/v1/organizations/${org}/stations/${sid}`));
-  const streams = await api.cached(`streams/${sid}`, 6 * HOUR, () =>
-    api.get(`/api/v1/organizations/${org}/datastreams?stationId=${sid}&status=active&limit=1000`));
-  const list = (Array.isArray(streams) ? streams : streams?.data || []).filter((d) => d && d.id);
+  const org = await orgOf(api, env);
+  const [meta, list] = await Promise.all([
+    api.cached(`station/${sid}`, 12 * HOUR, () => api.get(`/api/v1/organizations/${org}/stations/${sid}`)),
+    sensorList(api, org, sid),
+  ]);
   if (!list.length) throw new Error("No sensors found on this station");
 
   const ids = list.map((d) => d.id).slice(0, 200);
-  const latest = await api.cached(`latest/${sid}`, 5 * MIN, () =>
-    api.get(`/api/v1/data/organizations/${org}/datapoints/latest?datastream_ids=${ids.join(",")}`));
+  const latest = await api.get(`/api/v1/data/organizations/${org}/datapoints/latest?datastream_ids=${ids.join(",")}`);
   const readings = Object.entries(latest?.data || {})
     .map(([id, r]) => {
       const d = list.find((x) => x.id === id);
@@ -55,11 +97,8 @@ export async function homeStation({ lat, lon }, env, fetcher = fetch) {
   const end = Date.now(), start = end - 26 * HOUR;
   const series = async (k) => {
     if (!pick[k]) return [];
-    const out = await api.cached(`series/${pick[k].id}`, 15 * MIN, () =>
-      api.get(`/api/v1/organizations/${org}/datastreams/${pick[k].id}/datapoints?startEpoch=${start}&endEpoch=${end}&limit=15000`));
-    return (out?.data || []).filter((p) => typeof p.value === "number" && isFinite(p.value))
-      .map((p) => ({ t: typeof p.ts === "number" ? p.ts : Date.parse(p.ts), v: convert(k, p.value, pick[k].unit) }))
-      .filter((p) => isFinite(p.t) && p.v != null);
+    const out = await api.get(`/api/v1/organizations/${org}/datastreams/${pick[k].id}/datapoints?startEpoch=${start}&endEpoch=${end}&limit=15000`);
+    return points(out, k, pick[k].unit);
   };
   const [temps, winds, rains] = await Promise.all([series("temp"), series("wind"), series("rain")]);
 
@@ -81,13 +120,13 @@ export async function homeStation({ lat, lon }, env, fetcher = fetch) {
   }
 
   const name = m.name || m.alias || "My station";
+  const picked = new Set(Object.values(pick).map((r) => r.id));
   const station = {
     id: `CC-${sid}`,
     network: "home",
     mine: true,
     name,
     lat: sLat, lon: sLon,
-    dist: sLat != null && sLon != null ? round(distKm(lat, lon, sLat, sLon), 1) : 0,
     time: last ? new Date(last).toISOString() : null,
     temp: round1(val("temp")),
     humidity: round1(val("humidity")),
@@ -101,10 +140,14 @@ export async function homeStation({ lat, lon }, env, fetcher = fetch) {
     pressure: round1(val("pressure")),
     wx: null,
     elev: num(loc.elevation),
-    // Every sensor's latest reading, for the station card.
+    // Every sensor's latest reading, for the station card and the history explorer.
+    // `kind` marks the ones the app understands; `main` the one used for each kind.
     readings: readings
       .filter((r) => typeof r.value === "number" && isFinite(r.value))
-      .map((r) => ({ field: r.field, value: r.value, unit: r.unit, ts: r.ts })),
+      .map((r) => {
+        const kind = kindOf(r.field, r.unit);
+        return { id: r.id, field: r.field, table: r.table, interval: r.interval || null, value: r.value, unit: r.unit, ts: r.ts, kind, main: picked.has(r.id) || undefined };
+      }),
   };
 
   // Hour by hour, the reading closest to the top of each hour (like an airport report).
@@ -123,8 +166,74 @@ export async function homeStation({ lat, lon }, env, fetcher = fetch) {
   const obs = [...byHour.entries()].sort((a, b) => a[0] - b[0])
     .map(([h, o]) => ({ time: new Date(h).toISOString(), temp: o.temp != null ? round1(o.temp) : null, wind: o.wind != null ? round1(o.wind) : null }))
     .filter((o) => o.temp != null || o.wind != null);
-  const history = obs.length ? { id: station.id, name, dist: station.dist, home: true, obs } : null;
+  const history = obs.length ? { id: station.id, name, home: true, obs } : null;
   return { station, history };
+}
+
+async function orgOf(api, env) {
+  return env.CAMPBELL_ORG_ID || api.cached("org", 24 * HOUR, () => findOrg(api, env.CAMPBELL_STATION_ID));
+}
+async function sensorList(api, org, sid) {
+  const streams = await api.cached(`streams/${sid}`, 6 * HOUR, () =>
+    api.get(`/api/v1/organizations/${org}/datastreams?stationId=${sid}&status=active&limit=1000`));
+  return (Array.isArray(streams) ? streams : streams?.data || []).filter((d) => d && d.id);
+}
+function points(out, k, unit) {
+  return (out?.data || []).filter((p) => typeof p.value === "number" && isFinite(p.value))
+    .map((p) => ({ t: typeof p.ts === "number" ? p.ts : Date.parse(p.ts), v: k ? convert(k, p.value, unit) : p.value }))
+    .filter((p) => isFinite(p.t) && p.v != null);
+}
+
+// ---------- History: any sensors, any dates ----------
+
+const STEPS = [5 * MIN, 15 * MIN, 30 * MIN, HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR, 24 * HOUR, 7 * 24 * HOUR];
+const MAX_SPAN = 400 * 24 * HOUR;
+
+// The readings of chosen sensors between two times, grouped into at most ~400 steps
+// (5 minutes for a day, a day for a year). Each step has the average, lowest, highest and
+// total, in the app's units for the sensors it understands.
+// `offset` is the phone's offset from UTC in minutes, so days start at local midnight.
+export async function homeHistory({ from, to, ids, offset = 0 }, env, ctx, fetcher = fetch) {
+  if (!(isFinite(from) && isFinite(to) && to > from)) throw new Error("Pick a start and an end");
+  if (to - from > MAX_SPAN) throw new Error("Pick a range of a year or less");
+  const api = client(env, fetcher);
+  const org = await orgOf(api, env);
+  const [list, now] = await Promise.all([sensorList(api, org, env.CAMPBELL_STATION_ID), homeData(env, ctx, fetcher)]);
+  const units = Object.fromEntries((now.station.readings || []).map((r) => [r.id, r.unit]));
+  const wanted = list.filter((d) => ids.includes(d.id)).slice(0, 6);
+  if (!wanted.length) throw new Error("Those sensors aren't on this station");
+
+  const span = to - from;
+  const series = {};
+  await Promise.all(wanted.map(async (d) => {
+    const every = isoMs(d.metadata?.interval);
+    const each = isFinite(every) ? every : 15 * MIN;
+    const step = STEPS.find((s) => s >= each && span / s <= 400) || STEPS[STEPS.length - 1];
+    // CampbellON returns at most 15,000 points a call, so long ranges are read in pieces.
+    const pieces = Math.min(8, Math.max(1, Math.ceil(span / each / 14000)));
+    const part = Math.ceil(span / pieces);
+    const unit = units[d.id] || "";
+    const kind = kindOf(d.metadata?.field || "", unit);
+    const chunks = await Promise.all(Array.from({ length: pieces }, (_, i) => {
+      const a = from + i * part, b = Math.min(to, a + part);
+      return api.get(`/api/v1/organizations/${org}/datastreams/${d.id}/datapoints?startEpoch=${a}&endEpoch=${b}&limit=15000`);
+    }));
+    const pts = chunks.flatMap((c) => points(c, kind, unit));
+    series[d.id] = { field: d.metadata?.field || "", kind, step, buckets: bucket(pts, step, offset * MIN) };
+  }));
+  return { from, to, series };
+}
+
+export function bucket(pts, step, off = 0) {
+  const map = new Map();
+  for (const p of pts) {
+    const t = Math.floor((p.t + off) / step) * step - off;
+    const b = map.get(t) || { t, s: 0, n: 0, min: Infinity, max: -Infinity };
+    b.s += p.v; b.n++; b.min = Math.min(b.min, p.v); b.max = Math.max(b.max, p.v);
+    map.set(t, b);
+  }
+  return [...map.values()].sort((a, b) => a.t - b.t)
+    .map((b) => ({ t: b.t, avg: round(b.s / b.n, 2), min: round(b.min, 2), max: round(b.max, 2), sum: round(b.s, 2), n: b.n }));
 }
 
 // ---------- Which sensor is which ----------
@@ -254,7 +363,7 @@ function client(env, fetcher) {
     return value;
   }
 
-  return { get, cached };
+  return { get, cached, who };
 }
 
 // Without an organisation id, use the first organisation this login belongs to that has the station.

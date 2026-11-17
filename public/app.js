@@ -50,8 +50,11 @@ const state = {
   open: null,             // expanded provider id
   mode: store.get("wc.mode", "temp"), // what the list compares: all, temp, rain or wind
   page: "compare",        // compare, forecast or stations
-  stations: null,         // live station readings near the place
+  stations: null,         // live station readings near the place, your own station included
+  stationsRaw: null,      // the same from /api/stations alone
   stationsLoading: false,
+  home: null,             // your own station (home.js)
+  homeLoading: false,
 };
 
 const $ = (s) => document.querySelector(s);
@@ -83,6 +86,7 @@ async function refresh() {
   $("#refreshBtn").classList.add("spin");
   state.sourceErrors = {};
   const stationsDone = loadStations(place).then(render);
+  loadHome(); // your own station arrives on its own; nothing waits for it
   await Promise.all(
     sources.map(async (s) => {
       state.loading.add(s.id);
@@ -115,7 +119,8 @@ function placeKey(p) { return `${p.lat.toFixed(2)},${p.lon.toFixed(2)}`; }
 function setPlace(place) {
   state.place = place;
   state.results = {};
-  state.stations = null;
+  state.stationsRaw = null;
+  syncStations();
   if (window.StationMap) StationMap.reset();
   state.day = 0;
   state.open = null;
@@ -307,7 +312,15 @@ function circularMean(dirs) {
 
 // ---------- Rendering ----------
 
+// Many things ask for a redraw at once (each forecast source, the stations, your station), so
+// redraws are gathered up and done once per frame.
+let renderQueued = 0;
 function render() {
+  if (!renderQueued) renderQueued = requestAnimationFrame(() => { renderQueued = 0; renderNow(); });
+}
+
+function renderNow() {
+  if (renderQueued) { cancelAnimationFrame(renderQueued); renderQueued = 0; }
   renderHeader();
   const page = state.page;
   document.querySelectorAll(".tabs button").forEach((b) => (b.dataset.page === page ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")));
@@ -675,6 +688,24 @@ const sky_ = (() => {
   let canvas, ctx, w = 0, h = 0, dpr = 1, raf = 0, last = 0, visible = true;
   let cfg = { code: "cloudy", wind: 10, dir: 250 };
   let drops = [], flakes = [], clouds = [], streaks = [], flash = 0, nextFlash = 3;
+  // Soft shapes are drawn once into small images and then just moved each frame, which is far
+  // cheaper than building gradients sixty times a second.
+  let puff = null, glow = null, rays = null;
+  function sprites() {
+    if (puff) return;
+    const mk = (size, draw) => { const c = document.createElement("canvas"); c.width = c.height = size; draw(c.getContext("2d"), size / 2); return c; };
+    puff = mk(256, (g, r) => { const gr = g.createRadialGradient(r, r, 0, r, r, r); gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = gr; g.fillRect(0, 0, 2 * r, 2 * r); });
+    glow = mk(400, (g, r) => { const gr = g.createRadialGradient(r, r, 0, r, r, r); gr.addColorStop(0, "rgba(255,236,170,0.55)"); gr.addColorStop(0.35, "rgba(255,226,150,0.18)"); gr.addColorStop(1, "rgba(255,226,150,0)"); g.fillStyle = gr; g.fillRect(0, 0, 2 * r, 2 * r); });
+    rays = mk(540, (g, r) => {
+      g.translate(r, r);
+      for (let i = 0; i < 12; i++) {
+        g.rotate(Math.PI / 6);
+        const rg = g.createLinearGradient(0, 0, 260, 0);
+        rg.addColorStop(0, "rgba(255,240,200,0.12)"); rg.addColorStop(1, "rgba(255,240,200,0)");
+        g.fillStyle = rg; g.beginPath(); g.moveTo(0, 0); g.lineTo(260, -14); g.lineTo(260, 14); g.closePath(); g.fill();
+      }
+    });
+  }
   const still = matchMedia("(prefers-reduced-motion: reduce)");
 
   function setup() {
@@ -689,7 +720,8 @@ const sky_ = (() => {
     resize();
   }
   function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // The sky is soft and blurry, so 1.5× is as sharp as it needs to be on any screen.
+    dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     w = canvas.clientWidth; h = canvas.clientHeight;
     canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -719,13 +751,24 @@ const sky_ = (() => {
   function start() {
     if (still.matches || raf || !visible || document.visibilityState !== "visible") return;
     last = performance.now();
+    prev = 0;
     raf = requestAnimationFrame(loop);
   }
+  // On a phone that is struggling, draw every other frame: the sky still moves smoothly at
+  // 30 a second, and the rest of the app gets the time back.
+  // Frames that keep arriving late mean the phone is busy, so then draw every other one.
+  let gap = 16.7, prev = 0, skip = false, odd = false;
   function loop(now) {
     raf = 0;
-    const dt = Math.min((now - last) / 1000, 0.05);
-    last = now;
-    frame(dt);
+    if (prev) gap = gap * 0.95 + Math.min(now - prev, 100) * 0.05;
+    prev = now;
+    if (!skip && gap > 21) skip = true;
+    odd = !odd;
+    if (!(skip && odd)) {
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      frame(dt);
+    }
     if (visible && document.visibilityState === "visible") raf = requestAnimationFrame(loop);
   }
   function frame(dt) {
@@ -734,49 +777,51 @@ const sky_ = (() => {
     const wv = windVec();
     ctx.clearRect(0, 0, w, h);
 
+    sprites();
     if (cfg.code === "clear" || cfg.code === "partly") {
       // Soft sun glow with slowly turning rays.
-      const sx = w * 0.82, sy = h * 0.14, pulse = 1 + Math.sin(t * 0.6) * 0.04;
-      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, 190 * pulse);
-      g.addColorStop(0, "rgba(255,236,170,0.55)"); g.addColorStop(0.35, "rgba(255,226,150,0.18)"); g.addColorStop(1, "rgba(255,226,150,0)");
-      ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+      const sx = w * 0.82, sy = h * 0.14, gr = 190 * (1 + Math.sin(t * 0.6) * 0.04);
+      ctx.drawImage(glow, sx - gr, sy - gr, gr * 2, gr * 2);
       ctx.save(); ctx.translate(sx, sy); ctx.rotate(t * 0.04);
-      for (let i = 0; i < 12; i++) {
-        ctx.rotate(Math.PI / 6);
-        const rg = ctx.createLinearGradient(0, 0, 260, 0);
-        rg.addColorStop(0, "rgba(255,240,200,0.12)"); rg.addColorStop(1, "rgba(255,240,200,0)");
-        ctx.fillStyle = rg; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(260, -14); ctx.lineTo(260, 14); ctx.closePath(); ctx.fill();
-      }
+      ctx.drawImage(rays, -270, -270);
       ctx.restore();
     }
 
     for (const c of clouds) {
       c.x += (wv.x * 0.9 + (wv.x >= 0 ? 4 : -4)) * c.s * dt;
       if (c.x - c.r > w) c.x = -c.r; else if (c.x + c.r < 0) c.x = w + c.r;
+      ctx.globalAlpha = c.a;
       for (const [ox, oy, f] of [[0, 0, 1], [c.r * 0.55, c.r * 0.12, 0.75], [-c.r * 0.5, c.r * 0.15, 0.7]]) {
-        const g = ctx.createRadialGradient(c.x + ox, c.y + oy, 0, c.x + ox, c.y + oy, c.r * f);
-        g.addColorStop(0, `rgba(255,255,255,${c.a})`); g.addColorStop(1, "rgba(255,255,255,0)");
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(c.x + ox, c.y + oy, c.r * f, 0, 6.283); ctx.fill();
+        const r = c.r * f;
+        ctx.drawImage(puff, c.x + ox - r, c.y + oy - r, r * 2, r * 2);
       }
     }
+    ctx.globalAlpha = 1;
 
     if (drops.length) {
       const slant = (wv.x * 9) / 600; // horizontal px per vertical px
       ctx.lineCap = "round"; ctx.lineWidth = 1.1;
+      // Drops come in four shades; each shade is one path, so there are four strokes, not hundreds.
+      const paths = [new Path2D(), new Path2D(), new Path2D(), new Path2D()];
       for (const d of drops) {
         d.y += d.v * dt; d.x += d.v * slant * dt;
         if (d.y > h + 20) { d.y = -20 - Math.random() * 40; d.x = Math.random() * (w + 200) - 100; }
         if (d.x > w + 40) d.x -= w + 80; else if (d.x < -40) d.x += w + 80;
-        ctx.strokeStyle = `rgba(225,236,248,${d.a})`;
-        ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(d.x - d.l * slant, d.y - d.l); ctx.stroke();
+        const p = paths[Math.min(3, Math.floor((d.a - 0.18) / 0.0625))];
+        p.moveTo(d.x, d.y); p.lineTo(d.x - d.l * slant, d.y - d.l);
       }
+      paths.forEach((p, i) => { ctx.strokeStyle = `rgba(225,236,248,${0.21 + i * 0.0625})`; ctx.stroke(p); });
     }
 
-    for (const f of flakes) {
-      f.p += dt; f.y += f.v * dt; f.x += (wv.x * 1.6 + Math.sin(f.p * 1.3) * 14) * dt;
-      if (f.y > h + 6) { f.y = -6; f.x = Math.random() * w; }
-      if (f.x > w + 6) f.x = -6; else if (f.x < -6) f.x = w + 6;
-      ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, 6.283); ctx.fill();
+    if (flakes.length) {
+      const p = new Path2D();
+      for (const f of flakes) {
+        f.p += dt; f.y += f.v * dt; f.x += (wv.x * 1.6 + Math.sin(f.p * 1.3) * 14) * dt;
+        if (f.y > h + 6) { f.y = -6; f.x = Math.random() * w; }
+        if (f.x > w + 6) f.x = -6; else if (f.x < -6) f.x = w + 6;
+        p.moveTo(f.x + f.r, f.y); p.arc(f.x, f.y, f.r, 0, 6.283);
+      }
+      ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.fill(p);
     }
 
     if (streaks.length) {
@@ -849,7 +894,7 @@ function switchPage(p, before) {
   const swap = () => {
     if (before) before();
     state.page = p;
-    render();
+    renderNow();
     window.scrollTo({ top: 0 });
   };
   const still = from === to || matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -934,12 +979,13 @@ async function loadStations(place) {
   try {
     const body = await api(`/api/stations?lat=${place.lat}&lon=${place.lon}`);
     if (state.place !== place) return;
-    state.stations = body;
+    state.stationsRaw = body;
   } catch (err) {
     if (state.place !== place) return;
-    state.stations = { stations: [], networks: {}, error: err.message };
+    state.stationsRaw = { stations: [], networks: {}, error: err.message };
   } finally {
     state.stationsLoading = false;
+    syncStations();
   }
 }
 
@@ -980,13 +1026,25 @@ function placeElev() {
   return r ? r.elevation : null;
 }
 
+// The blend takes a while (a week of hours from every source), so it is only worked out
+// again when something it uses has changed.
+let predMemo = { deps: null, value: null };
 function prediction() {
   if (!state.place) return null;
   const providers = visibleProviders().map((p) => state.results[p.id]).filter((r) => r && r.ok);
   if (!providers.length) return null;
   const st = state.stations || {};
-  const skill = Blend.skillFrom(store.get(ledgerKey(), null));
-  return Blend.predict({ providers, stations: st.stations || [], nowKey: nowKey(), skill, reports: store.get(rateKey(), []), placeElev: placeElev(), place: state.place, hours: 168 });
+  const ledger = store.get(ledgerKey(), null);
+  const reports = store.get(rateKey(), []);
+  const deps = [state.place, st, nowKey(), ledger && ledger.at, reports.length, ...providers];
+  if (predMemo.deps && predMemo.deps.length === deps.length && predMemo.deps.every((d, i) => d === deps[i])) return predMemo.value;
+  const value = predictNow(providers, st, ledger, reports);
+  predMemo = { deps, value };
+  return value;
+}
+function predictNow(providers, st, ledger, reports) {
+  const skill = Blend.skillFrom(ledger);
+  return Blend.predict({ providers, stations: st.stations || [], nowKey: nowKey(), skill, reports, placeElev: placeElev(), place: state.place, hours: 168 });
 }
 
 // ---------- Rate the forecast ----------
@@ -1402,20 +1460,22 @@ function renderStationsPage() {
   }
   const st = state.stations;
   if (!st) {
-    box.innerHTML = `<div class="panel"><h2>Stations near you</h2><p class="lead">${state.stationsLoading ? "Reading stations…" : "Pick a place to see nearby stations."}</p></div>`;
+    box.innerHTML = `${homeCardHtml()}<div class="panel"><h2>Stations near you</h2><p class="lead">${state.stationsLoading ? "Reading stations…" : "Pick a place to see nearby stations."}</p></div>`;
     return;
   }
   const nets = Object.entries(NETWORKS).map(([id, [name]]) => {
     const n = (st.networks || {})[id] || {};
-    const status = !n.enabled ? ["", id === "home" ? "add your CampbellON login" : "needs a free key"]
+    const status = n.loading || (st.partial && id !== "home") ? ["wait", "checking…"]
+      : !n.enabled ? ["", id === "home" ? "add your CampbellON login" : "needs a free key"]
       : !n.ok ? ["bad", n.error || "not responding"]
-      : id === "home" ? (n.count ? ["ok", "live"] : ["", n.far != null ? `${fmt.dist(n.far)} away` : "no readings"])
+      : id === "home" ? (n.count ? ["ok", n.updating ? "updating…" : "live"] : ["", n.far != null ? `${fmt.dist(n.far)} away` : "no readings"])
       : ["ok", `${n.count} nearby`];
     return `<div class="net"><span>${name}</span><span class="st ${status[0]}">${esc(status[1])}</span></div>`;
   }).join("");
   let groups = "";
   const mine = (st.stations || []).find((s) => s.network === "home");
   const key = $("#keyMine");
+  const card = homeCardHtml();
   if (key) key.hidden = !mine;
   for (const [id, [name, lead]] of Object.entries(NETWORKS)) {
     const list = (st.stations || []).filter((s) => s.network === id);
@@ -1429,32 +1489,12 @@ function renderStationsPage() {
     }).join("");
     groups += `<section class="panel"><h2>${name}</h2>${rows}</section>`;
   }
-  box.innerHTML = `${mine ? homeCard(mine) : ""}<section class="panel"><h2>Station networks</h2><div class="nets">${nets}</div></section>${groups ||
+  box.innerHTML = `${card}<section class="panel"><h2>Station networks</h2><div class="nets">${nets}</div></section>${groups ||
     `<section class="panel"><p class="lead">No stations reported near here in the last few hours.</p></section>`}`;
+  homeCardWire(box);
   box.querySelectorAll(".srow.gauge").forEach((b) => {
     b.onclick = () => { state.openGauge = state.openGauge === b.dataset.id ? null : b.dataset.id; renderStationsPage(); };
   });
-}
-
-// Your own station: everything it measures now, its rain over the last day, and every sensor.
-function homeCard(s) {
-  const cell = (label, value, extra = "") => value == null ? "" : `<div class="mc"><small>${label}</small><b>${value}</b>${extra ? `<small>${extra}</small>` : ""}</div>`;
-  const wind = s.wind != null ? `<span class="mw">${windArrow(s.dir, "")}${fmt.windNum(s.wind)}</span>` : null;
-  const rain = s.rain1h != null ? (s.rain1h > 0 ? fmt.rain(s.rain1h) : "dry") : s.raining != null ? (s.raining ? "yes" : "dry") : null;
-  const cells = [
-    cell("Wind", wind, s.wind != null ? `${fmt.windUnit()}${s.dir != null ? " from " + compass(s.dir) : ""}${s.gust != null ? ` · gusts ${fmt.windNum(s.gust)}` : ""}` : ""),
-    cell("Rain", rain, s.rain24h != null ? `${s.rain24h > 0 ? fmt.rain(s.rain24h) : "dry"} in 24 h` : "last hour"),
-    cell("Humidity", s.humidity != null ? Math.round(s.humidity) + "%" : null),
-    cell("Pressure", s.pressure != null ? Math.round(s.pressure) : null, s.pressure != null ? "hPa" : ""),
-  ].join("");
-  const all = (s.readings || []).map((r) => `<tr><td>${esc(r.field)}</td><td>${esc(String(Math.round(r.value * 100) / 100))}${r.unit ? " " + esc(r.unit) : ""}</td></tr>`).join("");
-  return `<section class="panel mine-card">
-    <div class="mine-head"><div><span class="tag">My station</span><h2>${esc(s.name)}</h2><small>${s.dist >= 0.5 ? fmt.dist(s.dist) + " · " : ""}${ago(s.time)}</small></div>
-      <span class="mine-t">${s.temp != null ? fmt.temp(s.temp) : "–"}</span></div>
-    <div class="mine-grid">${cells}</div>
-    ${s.hourly ? `<div class="gdetail">${rainTimeline(s.hourly)}</div>` : ""}
-    ${all ? `<details class="mine-all"><summary>All sensors</summary><table>${all}</table></details>` : ""}
-  </section>`;
 }
 
 // A rain gauge: how much has fallen, and a 24-hour timeline when tapped.
@@ -1678,6 +1718,8 @@ function demoBody(url) {
     ];
   }
   if (url.pathname === "/api/stations") return demoStations(Number(url.searchParams.get("lat")), Number(url.searchParams.get("lon")));
+  if (url.pathname === "/api/home") return demoHome(Number(url.searchParams.get("lat")), Number(url.searchParams.get("lon")));
+  if (url.pathname === "/api/home/history") return demoHomeHistory(url.searchParams);
   const source = url.searchParams.get("source");
   const providers = PROVIDERS.filter((p) => p.source === source).map((p) => demoProvider(p));
   return { providers, fetchedAt: new Date().toISOString() };
@@ -1708,8 +1750,6 @@ function demoStations(lat, lon) {
     s({ id: "EGGW", network: "airport", name: london ? "Luton" : "Airport north", ...at(-15, 42), time: t(14), temp: 10.1, wind: 30, gust: 44, dir: 240, raining: true, wx: "light rain", pressure: 1005, cover: "OVC", elev: 160 }),
     s({ id: "MO-1", network: "metoffice", name: london ? "London St James's Park" : "Met Office station", ...at(-0.8, -0.9), time: t(31), temp: 11.9, humidity: 91, wind: 17, gust: 33, dir: 225, raining: true, pressure: 1006, elev: 5 }),
   ];
-  list.push(s({ id: "CC-demo", network: "home", mine: true, name: "Home", ...at(0.4, 0.3), time: t(4), temp: 11.8, humidity: 89, wind: 14, gust: 29, dir: 228, rain1h: 0.6, raining: true, pressure: 1006.4, elev: 20,
-    ...demoGauge(1, true), readings: [{ field: "AirTC_Avg", value: 11.8, unit: "Deg C" }, { field: "RH", value: 89, unit: "%" }, { field: "WS_ms_S_WVT", value: 3.9, unit: "meters/second" }, { field: "BattV_Min", value: 12.7, unit: "Volts" }] }));
   for (let i = 0; i < 7; i++) {
     const dx = (rnd(i + 200) - 0.5) * 40, dy = (rnd(i + 300) - 0.5) * 34;
     const wet = dx < 6;
@@ -1723,8 +1763,45 @@ function demoStations(lat, lon) {
   const count = (n) => list.filter((x) => x.network === n).length;
   return {
     stations: list, history, fetchedAt: new Date().toISOString(),
-    networks: Object.fromEntries(["home", "airport", "metoffice", "raingauge"].map((n) => [n, { enabled: true, ok: true, count: count(n) }])),
+    networks: Object.fromEntries(["airport", "metoffice", "raingauge"].map((n) => [n, { enabled: true, ok: true, count: count(n) }])),
   };
+}
+
+// A made-up home station a few hundred metres from the place, with a Campbell logger's field names.
+function demoHome(lat, lon) {
+  const t = new Date(Date.now() - 4 * 60000).toISOString();
+  const r = (id, field, value, unit, kind, main, table = "Table15") => ({ id, field, table, interval: table === "Table15" ? "PT15M" : "PT1H", value, unit, ts: t, kind, main });
+  const readings = [
+    r("t", "AirTC_Avg", 11.8, "Deg C", "temp", true), r("tmax", "AirTC_Max", 12.4, "Deg C", null), r("tmin", "AirTC_Min", 11.1, "Deg C", null),
+    r("rh", "RH", 89, "%", "humidity", true), r("ws", "WS_ms_S_WVT", 3.9, "meters/second", "wind", true), r("wsmax", "WS_ms_Max", 8.1, "meters/second", "gust", true),
+    r("wd", "WindDir_D1_WVT", 228, "degrees", "dir", true), r("wdsd", "WindDir_SD1_WVT", 18, "degrees", null), r("rain", "Rain_mm_Tot", 0.2, "mm", "rain", true),
+    r("bp", "BP_mbar_Avg", 1006.4, "mbar", "pressure", true), r("slr", "SlrW_Avg", 42, "W/m^2", null), r("slrmj", "SlrMJ_Tot", 0.04, "MJ/m^2", null),
+    r("dew", "DewPtC", 10.1, "Deg C", null), r("batt", "BattV_Min", 12.7, "Volts", null), r("pt", "PTemp_C", 13.2, "Deg C", null),
+  ];
+  const kmLat = 1 / 111, kmLon = 1 / (111 * Math.cos((lat * Math.PI) / 180));
+  const station = { id: "CC-demo", network: "home", mine: true, name: "Home", lat: lat + 0.3 * kmLat, lon: lon + 0.4 * kmLon, time: t, temp: 11.8, humidity: 89, wind: 14, gust: 29, dir: 228, rain1h: 0.6, raining: true, pressure: 1006.4, elev: 20, ...demoGauge(1, true), readings };
+  return { enabled: true, station, history: null, dist: 0.5 };
+}
+
+function demoHomeHistory(q) {
+  const from = Number(q.get("from")), to = Number(q.get("to")), id = q.get("ids");
+  const span = to - from;
+  const steps = [5, 15, 30, 60, 180, 360, 720, 1440, 10080].map((m) => m * 60000);
+  const step = steps.find((x) => x >= 15 * 60000 && span / x <= 400) || steps[steps.length - 1];
+  const wave = (t) => Math.sin(((new Date(t).getHours() + new Date(t).getMinutes() / 60 - 9) / 24) * 2 * Math.PI);
+  const season = (t) => 10 - 6 * Math.cos(((t / 864e5 - 15) / 365) * 2 * Math.PI);
+  const noise = (t) => { const x = Math.sin(t / 3.7e6) * 43758.5453; return x - Math.floor(x); };
+  const base = { t: (x) => season(x) + 4 * wave(x), tmax: (x) => season(x) + 5 * wave(x), tmin: (x) => season(x) + 3 * wave(x), rh: (x) => 80 - 12 * wave(x), ws: (x) => (3 + 2 * Math.sin(x / 9e6) + noise(x)) * 3.6, wsmax: (x) => (6 + 3 * Math.sin(x / 9e6) + 2 * noise(x)) * 3.6, wd: (x) => 200 + 60 * noise(x), bp: (x) => 1010 + 8 * Math.sin(x / 2.6e8), rain: (x) => (noise(x * 1.3) > 0.86 ? noise(x) * 0.8 : 0), slr: (x) => Math.max(0, 300 * wave(x)) }[id] || ((x) => 12 + noise(x));
+  const buckets = [];
+  for (let t = Math.floor(from / step) * step; t < to; t += step) {
+    if (noise(t * 7) > 0.985) continue; // the odd gap
+    const n = Math.max(1, Math.round(step / (15 * 60000)));
+    const vals = Array.from({ length: Math.min(n, 24) }, (_, i) => base(t + (i * step) / Math.min(n, 24)));
+    const sum = id === "rain" ? vals.reduce((a, b) => a + b, 0) * (n / Math.min(n, 24)) : vals.reduce((a, b) => a + b, 0);
+    buckets.push({ t, avg: sum / (id === "rain" ? n : vals.length), min: Math.min(...vals), max: Math.max(...vals), sum, n });
+  }
+  const kind = { t: "temp", rh: "humidity", ws: "wind", wsmax: "gust", wd: "dir", rain: "rain", bp: "pressure" }[id] || null;
+  return { from, to, series: { [id]: { field: id, kind, step, buckets } } };
 }
 
 function demoProvider(p) {
@@ -1804,6 +1881,7 @@ function init() {
   window.addEventListener("hashchange", () => switchPage(pageFromHash()));
   window.addEventListener("resize", () => { placeTabBlob(); renderModes(); });
   initChartScrub();
+  homeInit();
   // The Stations sheet and globe are laid out around the sky bar, so track its height.
   const skyH = () => {
     document.documentElement.style.setProperty("--sky-h", $("#sky").offsetHeight + "px");
