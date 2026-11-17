@@ -206,21 +206,91 @@ function toggleFav(key, readings) {
 
 // ---------- The card ----------
 
+// Each tile carries a small picture of what it measures: a compass for wind, a filling drop
+// for rain, a ring for humidity and soil moisture, a dial for pressure, a sun for UV and a
+// warmth bar for temperatures.
+function tileLook(r, all) {
+  const name = sensorName(r, all);
+  if (r.kind === "temp" || /temperature/i.test(name) && !/logger/i.test(name)) return "temp";
+  if (r.kind === "wind" || r.kind === "gust" || r.kind === "dir") return "wind";
+  if (r.kind === "rain") return "rain";
+  if (r.kind === "humidity") return "humid";
+  if (r.kind === "pressure") return "press";
+  if (/soil moisture/i.test(name)) return "soil";
+  if (/^uv/i.test(name)) return "uv";
+  return "";
+}
+const clampTo = (v, a, b) => Math.max(a, Math.min(b, v));
+function ringViz(f, cls) {
+  const C = 2 * Math.PI * 15, on = clampTo(f, 0, 1) * C;
+  return `<svg class="viz ${cls}" viewBox="0 0 40 40" aria-hidden="true"><circle class="trk" cx="20" cy="20" r="15"/>
+    <circle class="val" cx="20" cy="20" r="15" stroke-dasharray="${on.toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 20 20)"/>
+    <path class="ico" d="M20 13.5c2.6 3.3 4 5.5 4 7.3a4 4 0 0 1-8 0c0-1.8 1.4-4 4-7.3z"/></svg>`;
+}
+function windViz(dir, kmh) {
+  // The needle points the way the wind is blowing, and grows with its strength.
+  const len = 6 + clampTo((kmh || 0) / 50, 0, 1) * 8, rot = dir == null ? 0 : (dir + 180) % 360;
+  const ticks = [0, 90, 180, 270].map((a) => `<path class="tk" d="M20 4.5v3" transform="rotate(${a} 20 20)"/>`).join("");
+  return `<svg class="viz v-wind" viewBox="0 0 40 40" aria-hidden="true"><circle class="trk" cx="20" cy="20" r="16"/>${ticks}
+    <text x="20" y="13.2" class="n">N</text>
+    ${dir == null ? "" : `<g transform="rotate(${rot} 20 20)"><path class="val-f" d="M20 ${20 - len} 24.6 ${22 + len * 0.2} 20 ${20 + len * 0.12} 15.4 ${22 + len * 0.2}z"/></g>`}
+    <circle class="hub" cx="20" cy="20" r="1.6"/></svg>`;
+}
+function rainViz(id, mm) {
+  // The drop fills with the day's rain: full at 20 mm.
+  const f = clampTo((mm || 0) / 20, 0, 1), y = 36 - 30 * f;
+  const drop = "M20 5c6 7.5 10 13 10 18.2a10 10 0 0 1-20 0C10 18 14 12.5 20 5z";
+  const cid = "rv" + String(id).replace(/[^\w]/g, "");
+  return `<svg class="viz v-rain" viewBox="0 0 40 40" aria-hidden="true"><defs><clipPath id="${cid}"><path d="${drop}"/></clipPath></defs>
+    <path class="trk-f" d="${drop}"/>${f > 0 ? `<rect class="val-f" x="8" y="${y.toFixed(1)}" width="24" height="${(36 - y).toFixed(1)}" clip-path="url(#${cid})"/>` : ""}
+    <path class="edge" d="${drop}"/></svg>`;
+}
+function pressViz(hpa) {
+  // A barometer dial from 970 (stormy) to 1040 hPa (settled).
+  const f = clampTo(((hpa || 1010) - 970) / 70, 0, 1), a = Math.PI * (1 - f);
+  const x = 20 + 12 * Math.cos(a), y = 26 - 12 * Math.sin(a);
+  return `<svg class="viz v-press" viewBox="0 0 40 40" aria-hidden="true"><path class="trk" d="M5 26a15 15 0 0 1 30 0"/>
+    <path class="val" d="M5 26a15 15 0 0 1 ${(15 - 15 * Math.cos(a)).toFixed(1)} ${(-15 * Math.sin(a)).toFixed(1)}"/>
+    <path class="needle" d="M20 26L${x.toFixed(1)} ${y.toFixed(1)}"/><circle class="hub" cx="20" cy="26" r="2"/>
+    <text x="5" y="35" class="n">L</text><text x="35" y="35" class="n">H</text></svg>`;
+}
+function uvViz(uv) {
+  const n = clampTo(Math.round((uv || 0) * 1.2) + 4, 4, 12);
+  const rays = Array.from({ length: n }, (_, i) => `<path d="M20 5.5v4" transform="rotate(${(360 / n) * i} 20 20)"/>`).join("");
+  return `<svg class="viz v-uv" viewBox="0 0 40 40" aria-hidden="true"><g class="rays">${rays}</g><circle class="val-f" cx="20" cy="20" r="${(6 + clampTo(uv || 0, 0, 10) * 0.25).toFixed(1)}"/></svg>`;
+}
+function tempBar(c) {
+  // Where today sits from bitter (−10°) to hot (30°), on the same colours as the charts.
+  const f = clampTo(((c ?? 10) + 10) / 40, 0, 1);
+  const stops = WARMTH.map(([t, col]) => `${col} ${(((t + 10) / 40) * 100).toFixed(0)}%`).join(",");
+  return `<span class="tbar" style="--g:linear-gradient(90deg,${stops});--x:${(f * 100).toFixed(1)}%;--c:${mix(c ?? 10)}"><i></i></span>`;
+}
+
 function homeTile(r, s, all) {
   const k = favKey(r);
   const open = `data-hist="${esc(r.id)}"`;
+  const look = tileLook(r, all);
+  const std = r.value != null ? homeStd(r, r.value) : null;
+  const tile = (label, value, sub, viz) => `<button class="mc look-${look || "x"}" ${open} data-fav="${esc(k)}">${viz || ""}<small>${label}</small><b>${value}</b>${sub ? `<small>${sub}</small>` : ""}${look === "temp" ? tempBar(std) : ""}</button>`;
   if (r.kind === "wind" && r.main) {
-    return `<button class="mc" ${open} data-fav="${esc(k)}"><small>Wind</small><b><span class="mw">${windArrow(s.dir, "")}${fmt.windNum(s.wind)}</span></b>
-      <small>${fmt.windUnit()}${s.dir != null ? " from " + compass(s.dir) : ""}${s.gust != null ? ` · gusts ${fmt.windNum(s.gust)}` : ""}</small></button>`;
+    return tile("Wind", `${fmt.windNum(s.wind)} <small class="u">${fmt.windUnit()}</small>`,
+      `${s.dir != null ? "from " + compass(s.dir) : ""}${s.gust != null ? ` · gusts ${fmt.windNum(s.gust)}` : ""}`, windViz(s.dir, s.wind));
   }
   if (r.kind === "rain" && r.main) {
     const now = s.rain1h != null ? (s.rain1h > 0 ? fmt.rain(s.rain1h) : "Dry") : "–";
-    return `<button class="mc" ${open} data-fav="${esc(k)}"><small>Rain, last hour</small><b>${now}</b>
-      <small>${s.rain24h != null ? `${s.rain24h > 0 ? fmt.rain(s.rain24h) : "none"} in 24 h` : ""}</small></button>`;
+    return tile("Rain, last hour", now, s.rain24h != null ? `${s.rain24h > 0 ? fmt.rain(s.rain24h) : "none"} in 24 h` : "", rainViz(r.id, s.rain24h));
   }
-  return `<button class="mc" ${open} data-fav="${esc(k)}"><small>${esc(sensorName(r, all))}</small><b>${esc(sensorValue(r))}</b></button>`;
+  const viz = look === "wind" ? windViz(r.kind === "dir" ? r.value : s.dir, r.kind === "dir" ? s.wind : std)
+    : look === "rain" ? rainViz(r.id, std)
+    : look === "humid" ? ringViz((r.value || 0) / 100, "v-humid")
+    : look === "soil" ? ringViz(/m\^?3/i.test(r.unit || "") ? (r.value || 0) / 0.5 : (r.value || 0) / 50, "v-soil")
+    : look === "press" ? pressViz(std)
+    : look === "uv" ? uvViz(r.value)
+    : "";
+  return tile(esc(sensorName(r, all)), esc(sensorValue(r)), "", viz);
 }
 
+let homeCardEntered = false;
 function homeCardHtml() {
   const net = homeNet();
   const s = homeHere();
@@ -243,7 +313,9 @@ function homeCardHtml() {
       <button class="star${on ? " on" : ""}" data-star="${esc(k)}" aria-pressed="${on}" aria-label="${on ? "Unpin from" : "Pin to"} the card">${STAR_ICON}</button></li>`;
   }).join("");
   const when = state.homeLoading || state.home.cached ? `<span class="upd">${state.homeLoading ? "Updating" : ago(s.time)}</span>` : ago(s.time);
-  return `<section class="panel mine-card">
+  const enter = homeCardEntered ? "" : " enter";
+  homeCardEntered = true;
+  return `<section class="panel mine-card${enter}">
     <div class="mine-head"><div><span class="tag">My station</span><h2>${esc(s.name)}</h2><small>${s.dist >= 0.5 ? fmt.dist(s.dist) + " · " : ""}${when}</small></div>
       <button class="mine-t" data-hist="${esc((all.find((r) => r.kind === "temp" && r.main) || {}).id || "")}" aria-label="Temperature history">${s.temp != null ? fmt.temp(s.temp) : "–"}</button></div>
     ${tiles ? `<div class="mine-grid">${tiles}</div>` : `<p class="how">Star sensors below to pin them here.</p>`}
@@ -263,10 +335,30 @@ function homeCardWire(box) {
   const card = box.querySelector(".mine-card");
   if (!card) return;
   const all = (homeHere() || {}).readings || [];
-  card.querySelectorAll("[data-star]").forEach((b) => (b.onclick = () => { toggleFav(b.dataset.star, all); render(); }));
+  card.querySelectorAll("[data-star]").forEach((b) => (b.onclick = () => { toggleFav(b.dataset.star, all); redrawHomeCard(box, `[data-star="${CSS.escape(b.dataset.star)}"]`); }));
   card.querySelectorAll("[data-hist]").forEach((b) => (b.onclick = () => openHistory(b.dataset.hist)));
   const d = card.querySelector(".mine-all");
   if (d) d.ontoggle = () => (state.homeAllOpen = d.open);
+}
+
+// Redraw just the card, keeping whatever was tapped in the same place on screen: pinning a
+// sensor adds a tile above the list, and the page shouldn't jump because of it.
+function redrawHomeCard(box, anchorSel) {
+  const card = box.querySelector(".mine-card");
+  if (!card) return;
+  const before = box.querySelector(anchorSel);
+  const y0 = before ? before.getBoundingClientRect().top : 0;
+  const t = document.createElement("template");
+  t.innerHTML = homeCardHtml().trim();
+  const next = t.content.firstElementChild;
+  if (!next) return;
+  card.replaceWith(next);
+  homeCardWire(box);
+  const after = box.querySelector(anchorSel);
+  if (before && after) {
+    const dy = after.getBoundingClientRect().top - y0;
+    if (Math.abs(dy) > 0.5) window.scrollBy({ top: dy, behavior: "instant" });
+  }
 }
 
 // ---------- History explorer ----------
@@ -477,6 +569,7 @@ async function fetchHistory() {
     }
     if (req !== hx.req) return;
     hx.data = have;
+    hx.fresh = true;
   } catch (err) {
     if (req !== hx.req) return;
     hx.error = err.message;
@@ -492,7 +585,7 @@ function drawHistory() {
   const picked = hx.ids.map((id) => all.find((r) => r.id === id)).filter(Boolean);
 
   // What to show: the picked sensors as pills, and a tidy list to add or remove more.
-  const pills = picked.map((r) => `<span class="hpill k-${r.kind || "x"}"><i></i>${esc(sensorName(r, all))}${picked.length > 1 ? `<button data-drop="${esc(r.id)}" aria-label="Remove ${esc(sensorName(r, all))}">${ICON_X}</button>` : ""}</span>`).join("");
+  const pills = picked.map((r) => `<span class="hpill k-${r.kind || "x"}" data-id="${esc(r.id)}"><i></i>${esc(sensorName(r, all))}${picked.length > 1 ? `<button data-drop="${esc(r.id)}" aria-label="Remove ${esc(sensorName(r, all))}">${ICON_X}</button>` : ""}</span>`).join("");
   const add = `<button class="hpill add${hx.picking ? " on" : ""}" data-pick aria-expanded="${hx.picking}">${hx.picking ? "Done" : `${ICON_PLUS}Add`}</button>`;
   let picker = "";
   if (hx.picking) {
@@ -521,13 +614,18 @@ function drawHistory() {
         <button data-step="1" aria-label="Later"${atEnd ? " disabled" : ""}>${CHEV}</button></div>`;
 
   let blocks;
-  if (hx.loading) blocks = picked.map((r) => `<section class="hblock"><div class="hbhead"><b>${esc(sensorName(r, all))}</b></div><div class="hchart sk-chart" aria-busy="true"><span class="sk"></span></div></section>`).join("");
+  const body = sheet.querySelector(".hbody");
+  const old = new Map([...body.querySelectorAll(".hblock[data-id]")].map((b) => [b.dataset.id, b]));
+  const sheetTop = sheet.scrollTop, bodyTop = body.scrollTop;
+  const pickTop = body.querySelector(".hpicker")?.scrollTop || 0;
+  const skeleton = (r) => `<section class="hblock" data-id="${esc(r.id)}"><div class="hbhead"><b>${esc(sensorName(r, all))}</b></div><div class="hchart sk-chart" aria-busy="true"><span class="sk"></span></div></section>`;
+  // While loading, charts already on screen stay (faded); only new sensors get a placeholder.
+  if (hx.loading) blocks = picked.map((r) => (old.has(r.id) && !old.get(r.id).querySelector(".sk-chart") ? `<section data-keep="${esc(r.id)}"></section>` : skeleton(r))).join("");
   else if (hx.error) blocks = `<div class="hchart hmsg">${esc(hx.error)}</div>`;
   else blocks = picked.map((r) => histBlock(r, all)).join("");
   const anyLine = !hx.loading && !hx.error && picked.some((r) => !roseFor(r, all));
   const readout = `<div class="hread idle"><span>${anyLine ? "Touch a chart to read the values" : "&nbsp;"}</span></div>`;
 
-  const body = sheet.querySelector(".hbody");
   body.innerHTML = `
     <div class="hpills">${pills}${add}</div>
     ${picker}
@@ -535,14 +633,21 @@ function drawHistory() {
     ${nav}
     ${readout}
     <div class="hblocks">${blocks}</div>`;
+  body.querySelectorAll("[data-keep]").forEach((p) => { const b = old.get(p.dataset.keep); b.classList.add("busy"); p.replaceWith(b); });
+  if (hx.fresh && !hx.loading) { body.querySelectorAll(".hblock").forEach((b) => b.classList.add("enter")); hx.fresh = false; }
+  if (hx.pickOpened) { body.querySelector(".hpicker")?.classList.add("enter"); hx.pickOpened = false; }
+  if (hx.added) { body.querySelector(`.hpill[data-id="${CSS.escape(hx.added)}"]`)?.classList.add("enter"); hx.added = null; }
+  sheet.scrollTop = sheetTop; body.scrollTop = bodyTop;
+  const pk = body.querySelector(".hpicker");
+  if (pk) pk.scrollTop = pickTop;
 
   // Wiring.
-  body.querySelector("[data-pick]").onclick = () => { hx.picking = !hx.picking; drawHistory(); };
+  body.querySelector("[data-pick]").onclick = () => { hx.picking = !hx.picking; hx.pickOpened = hx.picking; drawHistory(); };
   body.querySelectorAll("[data-drop]").forEach((b) => (b.onclick = () => { hx.ids = hx.ids.filter((x) => x !== b.dataset.drop); fetchHistory(); }));
   body.querySelectorAll("[data-toggle]").forEach((b) => (b.onclick = () => {
     const id = b.dataset.toggle;
     if (hx.ids.includes(id)) { if (hx.ids.length > 1) hx.ids = hx.ids.filter((x) => x !== id); }
-    else if (hx.ids.length < MAX_PICK) hx.ids = [...hx.ids, id];
+    else if (hx.ids.length < MAX_PICK) { hx.ids = [...hx.ids, id]; hx.added = id; }
     fetchHistory();
   }));
   body.querySelectorAll("[data-span]").forEach((x) => (x.onclick = () => { hx.span = x.dataset.span; if (hx.span !== "custom") hx.anchor = Math.min(hx.anchor, Date.now()); fetchHistory(); }));
