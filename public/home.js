@@ -158,13 +158,29 @@ const EXTRA_WORDS = [
   [/diag/i, "Wind sensor health"],
   [/^record$/i, "Record number"],
 ];
-const hasSoilProbe = (all) => (all || []).some((x) => /vwc/i.test(x.field || ""));
+const hasSoilProbe = (all) => {
+  if (!all) return false;
+  let v = soilCache.get(all);
+  if (v == null) { v = all.some((x) => /vwc/i.test(x.field || "")); soilCache.set(all, v); }
+  return v;
+};
 function sensorWords(f, all) {
   const soil = hasSoilProbe(all) && SOIL_WORDS.find(([re]) => re.test(f));
   return soil || EXTRA_WORDS.find(([re]) => re.test(f)) || SENSOR_WORDS.find(([re]) => re.test(f));
 }
 
+// Names depend on the whole list (twins, soil probes), so they are worked out once per list.
+const nameCache = new WeakMap();
 function sensorName(r, all) {
+  if (!all) return sensorNameNow(r, all);
+  let m = nameCache.get(all);
+  if (!m) { m = new Map(); nameCache.set(all, m); }
+  let n = m.get(r);
+  if (n == null) { n = sensorNameNow(r, all); m.set(r, n); }
+  return n;
+}
+const soilCache = new WeakMap();
+function sensorNameNow(r, all) {
   const f = r.field || "";
   const name = sensorBase(r, all);
   // Two different sensors that still read the same: name the logger field so they can't be mixed up.
@@ -172,7 +188,16 @@ function sensorName(r, all) {
   return same ? `${name} · ${f}` : name;
 }
 
+const baseCache = new WeakMap();
 function sensorBase(r, all) {
+  if (!all) return sensorBaseNow(r, all);
+  let m = baseCache.get(all);
+  if (!m) { m = new Map(); baseCache.set(all, m); }
+  let n = m.get(r);
+  if (n == null) { n = sensorBaseNow(r, all); m.set(r, n); }
+  return n;
+}
+function sensorBaseNow(r, all) {
   const f = r.field || "";
   const hit = sensorWords(f, all);
   let name = hit ? hit[1] : f.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\s+/g, " ").trim();
