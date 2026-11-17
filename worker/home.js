@@ -102,7 +102,7 @@ async function readHome(api, env) {
     const out = await api.get(`/api/v1/organizations/${org}/datastreams/${pick[k].id}/datapoints?startEpoch=${start}&endEpoch=${end}&limit=15000`);
     return points(out, k, pick[k].unit);
   };
-  const [temps, winds, rains] = await Promise.all([series("temp"), series("wind"), series("rain")]);
+  const [temps, winds, rains, sends] = await Promise.all([series("temp"), series("wind"), series("rain"), uploads(api, org, readings, end)]);
 
   const times = [pick.temp, pick.wind, pick.rain, ...readings].filter(Boolean).map((r) => Date.parse(r.ts)).filter(isFinite);
   const last = times.length ? Math.max(...times) : null;
@@ -142,6 +142,10 @@ async function readHome(api, env) {
     pressure: round1(val("pressure")),
     wx: null,
     elev: num(loc.elevation),
+    // When the logger last sent its data to CampbellON, and how often it does (ms), so the app
+    // can say when the next batch is due. Readings only change when a batch arrives.
+    sent: sends.sent,
+    every: sends.every,
     // Every sensor's latest reading, for the station card and the history explorer.
     // `kind` marks the ones the app understands; `main` the one used for each kind.
     readings: readings
@@ -170,6 +174,33 @@ async function readHome(api, env) {
     .filter((o) => o.temp != null || o.wind != null);
   const history = obs.length ? { id: station.id, name, home: true, obs } : null;
   return { station, history };
+}
+
+// Loggers record every few minutes but send to CampbellON on their own schedule (often hourly).
+// The logger's Status table gets one row per send, so its recent timestamps show the rhythm.
+async function uploads(api, org, readings, end) {
+  const st = readings.filter((r) => /status/i.test(r.table) && typeof r.value === "number").sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts))[0];
+  const newest = Math.max(...readings.map((r) => Date.parse(r.ts)).filter(isFinite));
+  const out = { sent: isFinite(newest) ? new Date(newest).toISOString() : null, every: null };
+  if (!st) return out;
+  try {
+    // The rhythm barely changes, so it is worked out at most every three hours.
+    const pts = await api.cached(`sends/${st.id}`, 3 * HOUR, async () => {
+      const r = await api.get(`/api/v1/organizations/${org}/datastreams/${st.id}/datapoints?startEpoch=${end - 12 * HOUR}&endEpoch=${end}&limit=500`);
+      return points(r, null).map((p) => p.t);
+    });
+    out.every = sendEvery(pts);
+  } catch {}
+  return out;
+}
+export function sendEvery(times) {
+  // Rows a few minutes apart belong to the same send.
+  const t = [];
+  for (const x of [...new Set(times)].sort((a, b) => a - b)) if (!t.length || x - t[t.length - 1] > 15 * MIN) t.push(x); else t[t.length - 1] = x;
+  const gaps = t.slice(1).map((x, i) => x - t[i]).filter((g) => g < 25 * HOUR).sort((a, b) => a - b);
+  if (gaps.length < 2) return null;
+  const mid = gaps[Math.floor(gaps.length / 2)];
+  return Math.round(mid / MIN) * MIN;
 }
 
 async function orgOf(api, env) {

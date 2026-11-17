@@ -34,8 +34,37 @@ async function loadHome(extra = "") {
     state.homeLoading = false;
     syncStations();
     render();
+    watchSends();
   }
 }
+
+// When the station's next batch is due, fetch it (a couple of minutes after, then once more ten
+// minutes later if it was late), and keep the "next in … min" note ticking in between.
+let sendTimer = 0, sendTick = 0, sendTries = 0, sendSeen = null;
+function watchSends() {
+  clearTimeout(sendTimer);
+  const s = state.home && state.home.station;
+  if (!s || !s.every) return;
+  if (s.sent !== sendSeen) { sendSeen = s.sent; sendTries = 0; }
+  const due = Date.parse(s.sent) + s.every + 2 * 60e3 + sendTries * 10 * 60e3;
+  if (sendTries < 2) {
+    sendTimer = setTimeout(() => {
+      if (document.visibilityState !== "visible") return;
+      sendTries++;
+      loadHome("&fresh=1");
+    }, Math.max(30e3, due - Date.now()));
+  }
+  if (!sendTick) sendTick = setInterval(() => {
+    const el = document.querySelector(".mine-card .sent");
+    const h = homeHere();
+    if (el && h) el.textContent = sendNote(h);
+  }, 30e3);
+}
+document.addEventListener("visibilitychange", () => {
+  // Back in the app after the batch was due: fetch it now.
+  const s = state.home && state.home.station;
+  if (document.visibilityState === "visible" && s && s.every && Date.now() > Date.parse(s.sent) + s.every + 2 * 60e3 && !state.homeLoading && sendTries < 2) { sendTries++; loadHome("&fresh=1"); }
+});
 
 function homeHere() {
   const h = state.home;
@@ -290,6 +319,21 @@ function homeTile(r, s, all) {
   return tile(esc(sensorName(r, all)), esc(sensorValue(r)), "", viz);
 }
 
+// The station records every few minutes but sends its data in batches (often hourly), so say
+// when the last batch came in and when the next is due, rather than just "44 min ago".
+function sendNote(s, now = Date.now()) {
+  const last = Date.parse(s.sent || s.time);
+  if (!isFinite(last)) return ago(s.time);
+  const hm = (t) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const lastWords = `Sent ${hm(last)}`;
+  if (!s.every) return `${lastWords} · ${ago(new Date(last).toISOString())}`;
+  let next = last + s.every;
+  if (now > next + Math.max(15 * 60e3, s.every * 0.5)) return `${lastWords} · next batch is late`;
+  if (now > next) return `${lastWords} · next batch due now`;
+  const mins = Math.round((next - now) / 60e3);
+  return `${lastWords} · next ${mins <= 1 ? "any minute" : mins < 60 ? `in ${mins} min` : `about ${hm(next)}`}`;
+}
+
 let homeCardEntered = false;
 function homeCardHtml() {
   const net = homeNet();
@@ -312,7 +356,8 @@ function homeCardHtml() {
     return `<li><button class="sname" data-hist="${esc(r.id)}">${esc(sensorName(r, all))}</button><span class="sval">${esc(sensorValue(r))}</span>
       <button class="star${on ? " on" : ""}" data-star="${esc(k)}" aria-pressed="${on}" aria-label="${on ? "Unpin from" : "Pin to"} the card">${STAR_ICON}</button></li>`;
   }).join("");
-  const when = state.homeLoading || state.home.cached ? `<span class="upd">${state.homeLoading ? "Updating" : ago(s.time)}</span>` : ago(s.time);
+  const sent = `<span class="sent">${sendNote(s)}</span>`;
+  const when = state.homeLoading || state.home.cached ? `<span class="upd">${state.homeLoading ? "Updating" : sent}</span>` : sent;
   const enter = homeCardEntered ? "" : " enter";
   homeCardEntered = true;
   return `<section class="panel mine-card${enter}">
