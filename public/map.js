@@ -278,12 +278,15 @@
     const arrow = s.wind != null && s.dir != null
       ? `<svg class="mk-arrow" viewBox="0 0 24 24" style="transform:rotate(${(s.dir + 180) % 360}deg)"><path d="M12 2.5 18.5 20 12 16.2 5.5 20z"/></svg>` : "";
     const official = s.network === "airport" || s.network === "metoffice";
+    if (s.mine) {
+      return el(`<div class="mk-temp mine ${s.raining ? "wet" : ""}" style="--c:${tempColor(s.temp)}"><svg class="mk-house" viewBox="0 0 16 16"><path d="M8 2 1.5 7.5h2V14h3.5v-4h2v4h3.5V7.5h2z"/></svg>${f.temp(s.temp)}${arrow}</div>`, "st-mk temp");
+    }
     return el(`<div class="mk-temp ${official ? "official" : ""} ${s.raining ? "wet" : ""}" style="--c:${tempColor(s.temp)}">${f.temp(s.temp)}${arrow}</div>`, "st-mk temp");
   }
 
   function popupFor(s) {
     const f = opts.fmt;
-    const net = { airport: "Airport", metoffice: "Met Office station", raingauge: "Rain gauge" }[s.network];
+    const net = { airport: "Airport", metoffice: "Met Office station", raingauge: "Rain gauge", home: "My station" }[s.network];
     const rows = [];
     if (s.temp != null) rows.push(["Temperature", f.temp(s.temp)]);
     if (s.humidity != null) rows.push(["Humidity", Math.round(s.humidity) + "%"]);
@@ -322,7 +325,7 @@
       if (prev && prev._m) prev._m.remove();
       const node = markerEl(s);
       node.title = s.name;
-      node.style.zIndex = s.temp != null ? "2" : "1";
+      node.style.zIndex = s.mine ? "3" : s.temp != null ? "2" : "1";
       const pop = new maplibregl.Popup({ closeButton: false, offset: 14, maxWidth: "280px", className: "st-pop" }).setHTML(popupFor(s));
       const m = new maplibregl.Marker({ element: node, anchor: "center" }).setLngLat([s.lon, s.lat]).setPopup(pop).addTo(map);
       pop.on("open", () => keepInView(pop));

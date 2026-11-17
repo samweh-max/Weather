@@ -759,3 +759,36 @@ body.on-globe #main { padding-bottom: 0; }
 .st-handle:hover .grab, .st-handle:active .grab { width: 46px; background: color-mix(in srgb, var(--ink) 30%, transparent); }
 #pageStations.settling { transition: padding-top .45s cubic-bezier(.2, .9, .25, 1); }
 .globe-layer .maplibregl-ctrl-bottom-left, .globe-layer .maplibregl-ctrl-bottom-right { transition: bottom .45s cubic-bezier(.2, .9, .25, 1); }
+
+/* ---------- My station ---------- */
+.mine-card {
+  position: relative; overflow: hidden;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--rain) 9%, var(--surface)), var(--surface) 60%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--rain) 22%, var(--line)), 0 6px 22px rgba(0, 0, 0, 0.06);
+}
+.mine-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.mine-head h2 { margin: 2px 0 2px; }
+.mine-head small { color: var(--faint); font-size: 12px; }
+.mine-head .tag { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--rain); }
+.mine-t { font: 600 40px/1 var(--font-display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.mine-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.mine-grid .mc {
+  padding: 10px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--ink) 4%, transparent); box-shadow: inset 0 0 0 1px var(--line);
+}
+.mine-grid .mc small { display: block; color: var(--muted); font-size: 12px; }
+.mine-grid .mc b { display: flex; align-items: center; gap: 4px; font: 600 20px/1.3 var(--font-display); font-variant-numeric: tabular-nums; }
+.mine-grid .mc b svg { width: 14px; height: 14px; color: var(--wind); }
+.mine-card .gdetail { margin-top: 12px; }
+.mine-all { margin-top: 10px; font-size: 13px; }
+.mine-all summary { cursor: pointer; color: var(--muted); font-weight: 600; list-style: none; }
+.mine-all summary::-webkit-details-marker { display: none; }
+.mine-all summary::after { content: " ›"; display: inline-block; transition: transform 0.25s ease; }
+.mine-all[open] summary::after { transform: rotate(90deg); }
+.mine-all table { margin-top: 6px; width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.mine-all td { padding: 4px 0; border-top: 1px solid var(--line); }
+.mine-all td:last-child { text-align: right; }
+.mk-temp.mine { background: var(--c); color: #10202c; border-color: #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--rain) 45%, transparent), 0 2px 8px rgba(0, 0, 0, 0.3); }
+.mk-house { width: 11px; height: 11px; fill: currentColor; margin-right: 2px; }
+.map-key .k-mine { background: #86b8a0; border-radius: 999px; width: 18px; box-shadow: inset 0 0 0 1.5px #fff, 0 0 0 2px color-mix(in srgb, var(--rain) 45%, transparent); }
+.mine-grid .mw { display: inline-flex; align-items: center; gap: 4px; }

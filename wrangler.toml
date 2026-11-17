@@ -13,9 +13,14 @@ run_worker_first = ["/api/*"]
 [vars]
 # MET Norway asks every app to identify itself. Put your repo URL or email here.
 CONTACT = "https://github.com/samweh-max"
+# Your own weather station on CampbellON (campbellon.com). Its login goes in as secrets, see below.
+CAMPBELL_STATION_ID = "59efd9fd-3b3a-42d1-a83c-d3fdaf3bfc54"
 
 # API keys are secrets, never put them in this file. Set them with:
 #   npx wrangler secret put METOFFICE_KEY
 #   npx wrangler secret put ACCUWEATHER_KEY
 #   npx wrangler secret put OPENWEATHER_KEY
+# For your CampbellON station, a service account (best) or your own login:
+#   npx wrangler secret put CAMPBELL_CLIENT_ID      and CAMPBELL_CLIENT_SECRET
+#   npx wrangler secret put CAMPBELL_USERNAME       and CAMPBELL_PASSWORD
 

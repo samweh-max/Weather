@@ -80,12 +80,12 @@
   }
 
   // What the stations near the place are reading now. Closer stations count more;
-  // home stations count less than official ones.
+  // community stations count less than official ones, but your own station counts most.
   // Air cools about 0.65° per 100 m of height, so readings from stations higher or lower
   // than the place are shifted to the place's height.
   function observedNow(stations, nowMs, placeElev) {
     const recent = (stations || []).filter((s) => s.dist <= 40 && (!s.time || nowMs - Date.parse(s.time) < 2 * HOUR));
-    const trust = { airport: 1, metoffice: 1, netatmo: 0.35, raingauge: 1 };
+    const trust = { airport: 1, metoffice: 1, netatmo: 0.35, raingauge: 1, home: 2 };
     const w = (s) => (trust[s.network] || 0.5) / (1 + s.dist / 8);
     const temps = recent.filter((s) => s.temp != null);
     const atPlace = (s) => (placeElev != null && s.elev != null ? s.temp + (s.elev - placeElev) * 0.0065 : s.temp);
@@ -131,8 +131,8 @@
   }
 
   // What really happened here, hour by hour ("YYYY-MM-DDTHH" in local time): temperature and
-  // wind from the nearest airport's history, rain from the gauges within 20 km (closer count
-  // more). Each gauge reading covers the hour that ends at its time.
+  // wind from your own station when it is close (otherwise the nearest airport), rain from the
+  // gauges within 20 km, your own station's gauge included (closer count more). Each gauge reading covers the hour that ends at its time.
   function truthFrom(history, stations, toKey) {
     const out = new Map();
     const get = (k) => out.get(k) || (out.set(k, {}), out.get(k));
@@ -142,7 +142,7 @@
       if (o.temp != null && h.temp == null) h.temp = o.temp;
       if (o.wind != null && h.wind == null) h.wind = o.wind;
     }
-    const gauges = (stations || []).filter((s) => s.network === "raingauge" && s.hourly && s.dist <= 20);
+    const gauges = (stations || []).filter((s) => (s.network === "raingauge" || s.network === "home") && s.hourly && s.dist <= 20);
     const acc = new Map();
     for (const g of gauges) {
       const w = 1 / (1 + g.dist / 6);
