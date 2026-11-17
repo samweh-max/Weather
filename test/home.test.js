@@ -177,3 +177,8 @@ test("/api/home endpoint: off without a login, on with one", async () => {
   const h = await (await worker.fetch(new Request(`https://x/api/home/history?from=${now - HOUR}&to=${now}&ids=t`), env, {})).json();
   assert.ok(h.series.t.buckets.length >= 3);
 });
+
+test("bucket: wind direction averages round the compass", () => {
+  const b = bucket([{ t: 0, v: 350 }, { t: 1, v: 10 }], HOUR, 0, true);
+  assert.ok(b[0].avg < 1 || b[0].avg > 359);
+});

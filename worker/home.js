@@ -30,8 +30,8 @@ export function homeConfigured(env) {
 
 // The station near a place: the shared reading (see homeData) with the distance added.
 // Far from home it still answers, with `far` set, so the app can say how far away it is.
-export async function homeNear({ lat, lon }, env, ctx, fetcher = fetch) {
-  const data = await homeData(env, ctx, fetcher);
+export async function homeNear({ lat, lon }, env, ctx, fetcher = fetch, fresh = false) {
+  const data = await homeData(env, ctx, fetcher, fresh);
   const s = data.station;
   const dist = s.lat != null && s.lon != null ? round(distKm(lat, lon, s.lat, s.lon), 1) : 0;
   return { ...data, station: { ...s, dist }, history: data.history ? { ...data.history, dist } : null, dist };
@@ -48,7 +48,8 @@ const FRESH = 5 * MIN, KEEP = 3 * 24 * HOUR;
 // The station's reading, served from the last copy straight away. A copy older than five
 // minutes is still served, and a new one is fetched in the background for the next visit,
 // so opening the app never waits on CampbellON unless there is no copy at all.
-export async function homeData(env, ctx, fetcher = fetch) {
+// `fresh` (the refresh button) waits for a new reading unless the copy is under a minute old.
+export async function homeData(env, ctx, fetcher = fetch, fresh = false) {
   const api = client(env, fetcher);
   const key = new Request(`https://cache.weather/campbell/${encodeURIComponent(api.who || "")}/${env.CAMPBELL_STATION_ID}/result`);
   const cache = typeof caches !== "undefined" ? caches.default : null;
@@ -61,7 +62,8 @@ export async function homeData(env, ctx, fetcher = fetch) {
   };
   if (hit && hit.data) {
     const age = Date.now() - hit.at;
-    if (age < FRESH) return hit.data;
+    if (age < (fresh ? 60e3 : FRESH)) return hit.data;
+    if (fresh) return save().catch(() => ({ ...hit.data, stale: true }));
     const refresh = save().catch(() => null);
     if (ctx && ctx.waitUntil) { ctx.waitUntil(refresh); return { ...hit.data, stale: true }; }
     return (await refresh) || { ...hit.data, stale: true };
@@ -200,7 +202,7 @@ export async function homeHistory({ from, to, ids, offset = 0 }, env, ctx, fetch
   const org = await orgOf(api, env);
   const [list, now] = await Promise.all([sensorList(api, org, env.CAMPBELL_STATION_ID), homeData(env, ctx, fetcher)]);
   const units = Object.fromEntries((now.station.readings || []).map((r) => [r.id, r.unit]));
-  const wanted = list.filter((d) => ids.includes(d.id)).slice(0, 6);
+  const wanted = list.filter((d) => ids.includes(d.id)).slice(0, 8);
   if (!wanted.length) throw new Error("Those sensors aren't on this station");
 
   const span = to - from;
@@ -219,21 +221,27 @@ export async function homeHistory({ from, to, ids, offset = 0 }, env, ctx, fetch
       return api.get(`/api/v1/organizations/${org}/datastreams/${d.id}/datapoints?startEpoch=${a}&endEpoch=${b}&limit=15000`);
     }));
     const pts = chunks.flatMap((c) => points(c, kind, unit));
-    series[d.id] = { field: d.metadata?.field || "", kind, step, buckets: bucket(pts, step, offset * MIN) };
+    series[d.id] = { field: d.metadata?.field || "", kind, step, buckets: bucket(pts, step, offset * MIN, kind === "dir") };
   }));
   return { from, to, series };
 }
 
-export function bucket(pts, step, off = 0) {
+// `circular` is for wind direction: 350° and 10° average to north, not south.
+export function bucket(pts, step, off = 0, circular = false) {
   const map = new Map();
+  const R = Math.PI / 180;
   for (const p of pts) {
     const t = Math.floor((p.t + off) / step) * step - off;
-    const b = map.get(t) || { t, s: 0, n: 0, min: Infinity, max: -Infinity };
+    const b = map.get(t) || { t, s: 0, n: 0, min: Infinity, max: -Infinity, x: 0, y: 0 };
     b.s += p.v; b.n++; b.min = Math.min(b.min, p.v); b.max = Math.max(b.max, p.v);
+    if (circular) { b.x += Math.cos(p.v * R); b.y += Math.sin(p.v * R); }
     map.set(t, b);
   }
-  return [...map.values()].sort((a, b) => a.t - b.t)
-    .map((b) => ({ t: b.t, avg: round(b.s / b.n, 2), min: round(b.min, 2), max: round(b.max, 2), sum: round(b.s, 2), n: b.n }));
+  return [...map.values()].sort((a, b) => a.t - b.t).map((b) => ({
+    t: b.t,
+    avg: round(circular ? ((Math.atan2(b.y, b.x) / R) + 360) % 360 : b.s / b.n, 2),
+    min: round(b.min, 2), max: round(b.max, 2), sum: round(b.s, 2), n: b.n,
+  }));
 }
 
 // ---------- Which sensor is which ----------

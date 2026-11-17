@@ -885,3 +885,75 @@ button.mc:active, .hist-btn:active, .mine-t:active { transform: scale(0.97); }
 .hstats.three, .hstats:not(.three) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .hstats .mc b { font-size: 18px; }
 .hstats .mc small:last-child:not(:first-child) { font-size: 11px; color: var(--faint); }
+
+/* Refresh: spins while working, then a brief tick. */
+.sky-btn .ic-ok { display: none; }
+.sky-btn.done .ic-r { display: none; }
+.sky-btn.done .ic-ok { display: block; animation: pop 0.35s cubic-bezier(0.3, 1.6, 0.5, 1); }
+@keyframes pop { from { transform: scale(0.4); opacity: 0; } }
+
+/* ---------- History: choosing what to show ---------- */
+.hpills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.hpill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 6px 6px 10px; border-radius: 999px;
+  font: 600 13px var(--font-body); color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent); box-shadow: inset 0 0 0 1px var(--line);
+  animation: fadein 0.25s ease-out;
+}
+.hpill > i { width: 8px; height: 8px; border-radius: 50%; background: var(--ink); }
+.hpill.k-temp > i { background: var(--warm); }
+.hpill.k-wind > i, .hpill.k-gust > i, .hpill.k-dir > i { background: var(--wind); }
+.hpill.k-rain > i, .hpill.k-humidity > i, .hpill.k-pressure > i { background: var(--rain); }
+.hpill button { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: var(--muted); }
+.hpill button svg { width: 12px; height: 12px; }
+.hpill.add { padding: 6px 12px; color: var(--rain); background: color-mix(in srgb, var(--rain) 10%, transparent); box-shadow: none; }
+.hpill.add svg { width: 13px; height: 13px; }
+.hpill.add.on { background: var(--ink); color: var(--surface); }
+.hpicker {
+  margin-top: 10px; padding: 4px 12px 8px; border-radius: 16px; max-height: 44vh; overflow-y: auto;
+  background: color-mix(in srgb, var(--ink) 3%, transparent); box-shadow: inset 0 0 0 1px var(--line);
+  animation: fadein 0.25s ease-out;
+}
+.hpicker .how { margin: 8px 0 0; font-size: 12px; }
+.hpicker h4 { display: flex; align-items: center; gap: 5px; margin: 12px 0 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+.hpicker h4 svg { width: 12px; height: 12px; fill: #e9a93a; stroke: none; }
+.prow { width: 100%; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 42px; text-align: left; color: var(--ink); font: inherit; font-size: 14px; border-top: 1px solid var(--line); }
+.prow:disabled { opacity: 0.4; }
+.prow .tick { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; box-shadow: inset 0 0 0 1.6px var(--faint); color: transparent; transition: background 0.2s, box-shadow 0.2s, color 0.2s; }
+.prow .tick svg { width: 13px; height: 13px; }
+.prow.on .tick { background: var(--rain); box-shadow: none; color: #fff; }
+.prow .pn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow .pv { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+.hblocks { display: grid; gap: 10px; }
+.hblock { padding: 10px 0 2px; border-top: 1px solid var(--line); }
+.hblock:first-child { border-top: 0; padding-top: 0; }
+.hbhead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; min-height: 22px; }
+.hbhead > b { font: 600 15px var(--font-display); }
+.hval { font-variant-numeric: tabular-nums; text-align: right; }
+.hval b { font: 600 17px var(--font-display); }
+.hval small { color: var(--muted); font-size: 12px; margin-left: 4px; }
+.hread .hwhen { color: var(--ink); font-weight: 600; font-size: 14px; }
+.hblock .hchart { height: 150px; }
+.hsvg .ln.sun { stroke: #e0a21f; }
+.hblock .hstats { margin-top: 8px; }
+
+/* ---------- Wind compass ---------- */
+.rose { display: block; width: min(100%, 320px); margin: 6px auto 0; animation: fadein 0.35s ease-out; }
+.rose .rring { fill: none; stroke: var(--line); stroke-width: 1; }
+.rose .rl { font: 9px var(--font-body); fill: var(--faint); }
+.rose .rc { font: 600 12px var(--font-body); fill: var(--muted); text-anchor: middle; }
+.rose .rp { stroke: var(--surface); stroke-width: 1; transition: opacity 0.2s; }
+.rose .rp.dim { opacity: 0.25; }
+.rose .b0, .rlegend .b0 { fill: color-mix(in srgb, var(--wind) 22%, var(--surface)); background: color-mix(in srgb, var(--wind) 22%, var(--surface)); }
+.rose .b1, .rlegend .b1 { fill: color-mix(in srgb, var(--wind) 45%, var(--surface)); background: color-mix(in srgb, var(--wind) 45%, var(--surface)); }
+.rose .b2, .rlegend .b2 { fill: color-mix(in srgb, var(--wind) 70%, var(--surface)); background: color-mix(in srgb, var(--wind) 70%, var(--surface)); }
+.rose .b3, .rlegend .b3 { fill: var(--wind); background: var(--wind); }
+.rose .b4, .rlegend .b4 { fill: color-mix(in srgb, var(--wind) 70%, #000); background: color-mix(in srgb, var(--wind) 70%, #000); }
+.rose .rhit { fill: transparent; cursor: pointer; }
+.rose .rcalm { fill: var(--surface); stroke: var(--line); }
+.rose .rcalmt { font: 600 9px var(--font-body); fill: var(--muted); text-anchor: middle; }
+.rlegend { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px; margin-top: 6px; font-size: 11px; color: var(--muted); }
+.rlegend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+.rlegend .rlt { font-weight: 600; }
+.rfocus { text-align: center; font-size: 13px; margin: 8px 0 0; min-height: 18px; color: var(--ink); }
+.rfocus.idle { color: var(--faint); }

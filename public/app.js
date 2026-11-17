@@ -79,20 +79,28 @@ async function loadSources() {
   return state.sources;
 }
 
-async function refresh() {
+// `fresh` is the refresh button: ask the Worker for new data rather than its recent copy.
+let refreshing = 0;
+async function refresh(fresh = false) {
   const place = state.place;
   if (!place) return;
+  const run = ++refreshing;
+  const btn = $("#refreshBtn");
+  btn.classList.remove("done");
+  btn.classList.add("spin");
   const sources = (await loadSources()).filter((s) => s.enabled && sourceVisible(s.id));
-  $("#refreshBtn").classList.add("spin");
   state.sourceErrors = {};
-  const stationsDone = loadStations(place).then(render);
-  loadHome(); // your own station arrives on its own; nothing waits for it
+  const extra = fresh ? "&fresh=1" : "";
+  const stationsDone = loadStations(place, extra).then(render);
+  // Your own station arrives on its own; the page never waits for it, but the button does.
+  const homeDone = loadHome(extra);
   await Promise.all(
     sources.map(async (s) => {
       state.loading.add(s.id);
       render();
       try {
         const q = new URLSearchParams({ source: s.id, lat: place.lat, lon: place.lon, tz: place.tz || "UTC" });
+        if (fresh) q.set("fresh", "1");
         const body = await api(`/api/forecast?${q}`);
         if (state.place !== place) return;
         for (const p of body.providers) state.results[p.id] = p;
@@ -106,12 +114,17 @@ async function refresh() {
     })
   );
   await stationsDone;
-  if (state.place !== place) return;
-  recordSnapshot();
-  state.fetchedAt = Date.now();
-  store.set("wc.last", { key: placeKey(place), results: state.results, fetchedAt: state.fetchedAt });
-  $("#refreshBtn").classList.remove("spin");
-  render();
+  if (state.place === place) {
+    recordSnapshot();
+    state.fetchedAt = Date.now();
+    store.set("wc.last", { key: placeKey(place), results: state.results, fetchedAt: state.fetchedAt });
+    render();
+  }
+  await homeDone;
+  if (run !== refreshing) return;
+  // Stop spinning and show a tick for a moment, so it's clear the refresh finished.
+  btn.classList.remove("spin");
+  if (fresh) { btn.classList.add("done"); setTimeout(() => btn.classList.remove("done"), 1400); }
 }
 
 function placeKey(p) { return `${p.lat.toFixed(2)},${p.lon.toFixed(2)}`; }
@@ -364,7 +377,7 @@ function applyHero(m) {
 
 function renderHeader() {
   $("#placeName").textContent = state.place ? state.place.name : "Choose a place";
-  $("#refreshBtn").classList.toggle("spin", state.loading.size > 0);
+  if (state.loading.size > 0) $("#refreshBtn").classList.add("spin");
 }
 
 function dayLabel(date, i) {
@@ -974,10 +987,10 @@ function initSheetDrag() {
 
 // ---------- Stations data and the Forecaster ----------
 
-async function loadStations(place) {
+async function loadStations(place, extra = "") {
   state.stationsLoading = true;
   try {
-    const body = await api(`/api/stations?lat=${place.lat}&lon=${place.lon}`);
+    const body = await api(`/api/stations?lat=${place.lat}&lon=${place.lon}${extra}`);
     if (state.place !== place) return;
     state.stationsRaw = body;
   } catch (err) {
@@ -1784,14 +1797,19 @@ function demoHome(lat, lon) {
 }
 
 function demoHomeHistory(q) {
-  const from = Number(q.get("from")), to = Number(q.get("to")), id = q.get("ids");
+  const series = {};
+  for (const id of (q.get("ids") || "").split(",").filter(Boolean)) Object.assign(series, demoHomeSeries(q, id).series);
+  return { from: Number(q.get("from")), to: Number(q.get("to")), series };
+}
+function demoHomeSeries(q, id) {
+  const from = Number(q.get("from")), to = Number(q.get("to"));
   const span = to - from;
   const steps = [5, 15, 30, 60, 180, 360, 720, 1440, 10080].map((m) => m * 60000);
   const step = steps.find((x) => x >= 15 * 60000 && span / x <= 400) || steps[steps.length - 1];
   const wave = (t) => Math.sin(((new Date(t).getHours() + new Date(t).getMinutes() / 60 - 9) / 24) * 2 * Math.PI);
   const season = (t) => 10 - 6 * Math.cos(((t / 864e5 - 15) / 365) * 2 * Math.PI);
   const noise = (t) => { const x = Math.sin(t / 3.7e6) * 43758.5453; return x - Math.floor(x); };
-  const base = { t: (x) => season(x) + 4 * wave(x), tmax: (x) => season(x) + 5 * wave(x), tmin: (x) => season(x) + 3 * wave(x), rh: (x) => 80 - 12 * wave(x), ws: (x) => (3 + 2 * Math.sin(x / 9e6) + noise(x)) * 3.6, wsmax: (x) => (6 + 3 * Math.sin(x / 9e6) + 2 * noise(x)) * 3.6, wd: (x) => 200 + 60 * noise(x), bp: (x) => 1010 + 8 * Math.sin(x / 2.6e8), rain: (x) => (noise(x * 1.3) > 0.86 ? noise(x) * 0.8 : 0), slr: (x) => Math.max(0, 300 * wave(x)) }[id] || ((x) => 12 + noise(x));
+  const base = { t: (x) => season(x) + 4 * wave(x), tmax: (x) => season(x) + 5 * wave(x), tmin: (x) => season(x) + 3 * wave(x), rh: (x) => 80 - 12 * wave(x), ws: (x) => (3 + 2 * Math.sin(x / 9e6) + noise(x)) * 3.6, wsmax: (x) => (6 + 3 * Math.sin(x / 9e6) + 2 * noise(x)) * 3.6, wd: (x) => (noise(x / 3) > 0.8 ? 20 + 80 * noise(x) : 205 + 50 * (noise(x) - 0.5) + 30 * Math.sin(x / 2e8) + 360) % 360, bp: (x) => 1010 + 8 * Math.sin(x / 2.6e8), rain: (x) => (noise(x * 1.3) > 0.86 ? noise(x) * 0.8 : 0), slr: (x) => Math.max(0, 300 * wave(x)) }[id] || ((x) => 12 + noise(x));
   const buckets = [];
   for (let t = Math.floor(from / step) * step; t < to; t += step) {
     if (noise(t * 7) > 0.985) continue; // the odd gap
@@ -1874,7 +1892,7 @@ function init() {
     if (stat && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); showTip(stat); }
   });
   $("#settingsBtn").onclick = openSettings;
-  $("#refreshBtn").onclick = () => refresh();
+  $("#refreshBtn").onclick = () => refresh(true);
   $("#gpsBtn").onclick = useGps;
   $("#search").oninput = onSearch;
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => goPage(b.dataset.page)));
