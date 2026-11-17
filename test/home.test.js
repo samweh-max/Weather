@@ -1,7 +1,7 @@
 // Home station on CampbellON, run against sample responses (no network needed).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { homeStation, homeNear, homeHistory, kindOf, pickSensors, convert, bucket, guessUnit } from "../worker/home.js";
+import { homeStation, homeNear, homeHistory, kindOf, pickSensors, convert, bucket, guessUnit, sendEvery } from "../worker/home.js";
 import { stationsNear } from "../worker/stations.js";
 import worker from "../worker/index.js";
 
@@ -192,4 +192,12 @@ test("fills in units the logger left out, but not for probe internals", () => {
   assert.equal(guessUnit("PA_Avg"), "");
   assert.equal(guessUnit("WSDiag"), "");
   assert.equal(kindOf("T_Avg", "Deg C"), null);
+});
+
+test("works out how often the logger sends, counting rows close together as one send", () => {
+  const t0 = Date.UTC(2026, 10, 17, 9, 10);
+  const times = [];
+  for (let h = 0; h < 12; h++) times.push(t0 + h * HOUR, t0 + h * HOUR + 40e3);
+  assert.equal(sendEvery(times), HOUR);
+  assert.equal(sendEvery([t0]), null);
 });

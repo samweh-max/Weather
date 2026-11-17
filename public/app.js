@@ -1917,7 +1917,7 @@ function demoHome(lat, lon) {
     r("dew", "DewPtC", 10.1, "Deg C", null), r("batt", "BattV_Min", 12.7, "Volts", null), r("pt", "PTemp_C", 13.2, "Deg C", null),
   ];
   const kmLat = 1 / 111, kmLon = 1 / (111 * Math.cos((lat * Math.PI) / 180));
-  const station = { id: "CC-demo", network: "home", mine: true, name: "Home", lat: lat + 0.3 * kmLat, lon: lon + 0.4 * kmLon, time: t, temp: 11.8, humidity: 89, wind: 14, gust: 29, dir: 228, rain1h: 0.6, raining: true, pressure: 1006.4, elev: 20, ...demoGauge(1, true), readings };
+  const station = { id: "CC-demo", network: "home", mine: true, name: "Home", lat: lat + 0.3 * kmLat, lon: lon + 0.4 * kmLon, time: t, temp: 11.8, humidity: 89, wind: 14, gust: 29, dir: 228, rain1h: 0.6, raining: true, pressure: 1006.4, elev: 20, sent: t, every: 3600e3, ...demoGauge(1, true), readings };
   return { enabled: true, station, history: null, dist: 0.5 };
 }
 
