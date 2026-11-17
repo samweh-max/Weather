@@ -792,3 +792,96 @@ body.on-globe #main { padding-bottom: 0; }
 .mk-house { width: 11px; height: 11px; fill: currentColor; margin-right: 2px; }
 .map-key .k-mine { background: #86b8a0; border-radius: 999px; width: 18px; box-shadow: inset 0 0 0 1.5px #fff, 0 0 0 2px color-mix(in srgb, var(--rain) 45%, transparent); }
 .mine-grid .mw { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Loading placeholder: same shape as the card, a soft light passing over it. */
+.sk { display: block; border-radius: 6px; background: linear-gradient(90deg, var(--track) 0%, color-mix(in srgb, var(--track) 45%, var(--surface)) 50%, var(--track) 100%); background-size: 200% 100%; animation: sheen 1.6s ease-in-out infinite; }
+@keyframes sheen { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.mine-card.loading .sk-name { width: 120px; height: 20px; margin: 6px 0 6px; }
+.mine-card.loading .sk-sub { width: 80px; height: 10px; }
+.mine-card.loading .sk-t { width: 64px; height: 40px; border-radius: 10px; }
+.mine-card.loading .sk-l { width: 50%; height: 10px; margin-bottom: 8px; }
+.mine-card.loading .sk-v { width: 70%; height: 18px; }
+.mine-card { animation: fadein 0.35s ease-out; }
+@keyframes fadein { from { opacity: 0; transform: translateY(4px); } }
+.mine-card.loading { animation: none; }
+.net .st.wait { color: var(--faint); }
+.upd { display: inline-flex; align-items: center; gap: 5px; }
+.upd::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--rain); animation: breathe 1.4s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: 0.25; transform: scale(0.7); } }
+
+/* Card tiles are buttons: tap one to see its history. */
+button.mc { text-align: left; color: inherit; font: inherit; transition: transform 0.15s ease, background 0.2s ease; }
+button.mc:active, .hist-btn:active, .mine-t:active { transform: scale(0.97); }
+.mine-t { color: inherit; padding: 0; transition: transform 0.15s ease; }
+.hist-btn {
+  width: 100%; display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 12px 14px; border-radius: 14px;
+  background: color-mix(in srgb, var(--rain) 10%, transparent); color: var(--rain); font-weight: 600; text-align: left;
+  transition: transform 0.15s ease, background 0.2s ease;
+}
+.hist-btn svg { width: 18px; height: 18px; flex: none; }
+.hist-btn small { color: var(--muted); font-weight: 500; font-size: 12px; margin-left: auto; }
+.hist-btn .chev { width: 16px; height: 16px; color: var(--faint); margin-left: 0; }
+.mine-all summary small { color: var(--faint); font-weight: 500; margin-left: 4px; }
+.mine-all .how { margin: 8px 0 2px; font-size: 12px; }
+.mine-all ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.mine-all li { display: grid; grid-template-columns: minmax(0, 1fr) auto 36px; align-items: center; gap: 8px; border-top: 1px solid var(--line); min-height: 42px; }
+.mine-all .sname { text-align: left; color: var(--ink); font: inherit; font-size: 14px; padding: 8px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mine-all .sval { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px; }
+.star { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; color: var(--faint); }
+.star svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; transition: transform 0.25s cubic-bezier(0.3, 1.6, 0.5, 1), fill 0.2s; }
+.star.on { color: #e9a93a; }
+.star.on svg { fill: currentColor; transform: scale(1.1); }
+
+/* ---------- History explorer ---------- */
+.sheet.hist { max-height: 92vh; }
+.sheet .tag { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--rain); }
+.hchips { display: flex; gap: 6px; overflow-x: auto; margin: 10px -16px 0; padding: 2px 16px 4px; scrollbar-width: none; }
+.hchips::-webkit-scrollbar { display: none; }
+.hchip, .hmore {
+  flex: none; padding: 7px 12px; border-radius: 999px; font: 600 13px var(--font-body); color: var(--muted);
+  background: color-mix(in srgb, var(--ink) 5%, transparent); box-shadow: inset 0 0 0 1px var(--line); border: 0;
+  transition: background 0.2s, color 0.2s;
+}
+.hchip.on, .hmore.on { background: var(--ink); color: var(--surface); box-shadow: none; }
+.hmore { appearance: none; -webkit-appearance: none; padding-right: 24px; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%; background-size: 4px 4px; background-repeat: no-repeat; }
+.hseg { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; margin-top: 12px; padding: 3px; border-radius: 12px; background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.hseg button { padding: 7px 0; border-radius: 9px; font: 600 13px var(--font-body); color: var(--muted); transition: background 0.2s, color 0.2s, box-shadow 0.2s; }
+.hseg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
+.hnav { display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; margin-top: 10px; }
+.hnav > button { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; color: var(--ink); }
+.hnav > button:disabled { opacity: 0.25; }
+.hnav > button svg { width: 18px; height: 18px; }
+.hnav > button:first-child svg { transform: rotate(180deg); }
+.hlabel { position: relative; text-align: center; font: 600 16px var(--font-display); }
+.hlabel span { cursor: pointer; padding: 6px 10px; border-radius: 10px; }
+.hlabel span:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.hlabel input { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
+.hcustom { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.hcustom label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.hcustom input { font: 600 14px var(--font-body); color: var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); border: 0; border-radius: 10px; padding: 9px 10px; box-shadow: inset 0 0 0 1px var(--line); }
+.hread { display: flex; align-items: baseline; gap: 8px; min-height: 34px; margin-top: 8px; }
+.hread b { font: 600 26px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.hread span { color: var(--muted); font-size: 13px; }
+.hread.idle span { color: var(--faint); }
+.hchart { height: 180px; margin-top: 4px; border-radius: 12px; }
+.hchart.hmsg { display: grid; place-items: center; color: var(--muted); font-size: 14px; background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.sk-chart .sk { height: 100%; border-radius: 12px; opacity: 0.7; }
+.hsvg { touch-action: pan-y; user-select: none; -webkit-user-select: none; animation: fadein 0.3s ease-out; }
+.hsvg .yl { font: 10px var(--font-body); fill: var(--faint); text-anchor: end; }
+.hsvg .xl { font: 10px var(--font-body); fill: var(--faint); text-anchor: middle; }
+.hsvg .ln { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.hsvg .band { fill: var(--ink); opacity: 0.08; }
+.hsvg .dot { fill: var(--ink); }
+.hsvg .k-temp { stroke: var(--warm); fill: var(--warm); }
+.hsvg .ln.k-temp, .hsvg .ln.k-wind, .hsvg .ln.k-humidity, .hsvg .ln.k-pressure, .hsvg .ln.k-gust { fill: none; }
+.hsvg .band.k-temp { fill: var(--warm); opacity: 0.16; stroke: none; }
+.hsvg .k-wind, .hsvg .k-gust { stroke: var(--wind); }
+.hsvg .band.k-wind, .hsvg .band.k-gust { fill: var(--wind); opacity: 0.14; stroke: none; }
+.hsvg .k-humidity, .hsvg .k-pressure { stroke: var(--rain); }
+.hsvg .band.k-humidity, .hsvg .band.k-pressure { fill: var(--rain); opacity: 0.12; stroke: none; }
+.hsvg .hscrub { stroke: var(--ink); stroke-width: 1; opacity: 0.35; }
+.hsvg .hsdot { fill: var(--surface); stroke: var(--ink); stroke-width: 2; }
+.hstats { margin-top: 12px; }
+.hstats.three, .hstats:not(.three) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.hstats .mc b { font-size: 18px; }
+.hstats .mc small:last-child:not(:first-child) { font-size: 11px; color: var(--faint); }

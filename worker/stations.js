@@ -9,45 +9,32 @@
 //   airport    – airport METAR reports via aviationweather.gov (free, no key)
 //   raingauge  – Environment Agency rain gauges, England (free, no key)
 //   metoffice  – Met Office land observations (free DataHub key, separate subscription)
-//   home       – your own station on CampbellON (see home.js), when within 80 km
-
-import { homeConfigured, homeStation } from "./home.js";
 
 const KT = 1.852;
-const HOME_RANGE = 80; // km: further away than this, your station says little about the place
 
 export async function stationsNear({ lat, lon }, env) {
   const jobs = {
     airport: () => airports(lat, lon),
     raingauge: () => rainGauges(lat, lon),
     metoffice: env.METOFFICE_OBS_KEY || env.METOFFICE_KEY ? () => metOfficeObs(lat, lon, env) : null,
-    home: homeConfigured(env) ? async () => {
-      const h = await homeStation({ lat, lon }, env);
-      const near = h.station.dist <= HOME_RANGE;
-      return { stations: near ? [h.station] : [], homeHistory: near ? h.history : null, far: near ? null : h.station.dist };
-    } : null,
   };
   const networks = {};
   const stations = [];
-  let history = null, homeHistory = null;
+  let history = null;
   await Promise.all(
     Object.entries(jobs).map(async ([id, job]) => {
       if (!job) { networks[id] = { enabled: false }; return; }
       try {
         const out = await job();
-        networks[id] = { enabled: true, ok: true, count: out.stations.length, ...(out.far != null ? { far: Math.round(out.far) } : {}) };
+        networks[id] = { enabled: true, ok: true, count: out.stations.length };
         stations.push(...out.stations);
         if (out.history) history = out.history;
-        if (out.homeHistory) homeHistory = out.homeHistory;
       } catch (err) {
         networks[id] = { enabled: true, ok: false, error: String(err.message || err) };
       }
     })
   );
   stations.sort((a, b) => a.dist - b.dist);
-  // Your own station is the best record of what really happened here, when it is close enough.
-  // Its track needs temperatures for the forecast checks; wind and rain fill in where it has them.
-  if (homeHistory && homeHistory.dist <= 15 && homeHistory.obs.some((o) => o.temp != null)) history = homeHistory;
   return { stations, networks, history };
 }
 

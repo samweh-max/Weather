@@ -1,8 +1,9 @@
 // Home station on CampbellON, run against sample responses (no network needed).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { homeStation, kindOf, pickSensors, convert } from "../worker/home.js";
+import { homeStation, homeNear, homeHistory, kindOf, pickSensors, convert, bucket } from "../worker/home.js";
 import { stationsNear } from "../worker/stations.js";
+import worker from "../worker/index.js";
 
 const SID = "59efd9fd-3b3a-42d1-a83c-d3fdaf3bfc54";
 const ORG = "org-1";
@@ -124,24 +125,55 @@ test("reads the station: latest values, rain totals and an hourly track", async 
   assert.ok(history.obs.every((o) => o.temp != null && o.wind === 14.4));
 });
 
-test("shows up as a nearby station and becomes the forecast check", async () => {
-  const r = await stationsNear(place, env);
-  assert.equal(r.networks.home.ok, true);
-  assert.equal(r.networks.home.count, 1);
-  const home = r.stations.find((s) => s.network === "home");
-  assert.equal(home.mine, true);
-  assert.equal(r.history.home, true);
-  assert.equal(r.history.name, "Garden");
+test("readings say which sensors the app understands", async () => {
+  const { station: s } = await homeStation(place, env);
+  const t = s.readings.find((r) => r.field === "AirTC_Avg");
+  assert.equal(t.kind, "temp");
+  assert.equal(t.main, true);
+  assert.equal(t.table, "Table15");
+  assert.equal(s.readings.find((r) => r.field === "BattV_Min").kind, null);
 });
 
-test("left out when the place is far from home", async () => {
-  const r = await stationsNear({ lat: 55.95, lon: -3.19 }, env);
-  assert.equal(r.networks.home.count, 0);
-  assert.ok(r.networks.home.far > 300);
+test("far from home it still answers, with the distance", async () => {
+  const r = await homeNear({ lat: 55.95, lon: -3.19 }, env);
+  assert.ok(r.dist > 300);
+});
+
+test("no longer slows the other stations: not part of /api/stations", async () => {
+  const r = await stationsNear(place, env);
+  assert.equal(r.networks.home, undefined);
   assert.ok(!r.stations.some((s) => s.network === "home"));
 });
 
-test("off without a login", async () => {
-  const r = await stationsNear(place, { CAMPBELL_STATION_ID: SID });
-  assert.equal(r.networks.home.enabled, false);
+test("history: chosen sensors between two dates, in steps, in app units", async () => {
+  const to = now, from = now - 24 * HOUR;
+  const r = await homeHistory({ from, to, ids: ["t", "rain", "ws", "nope"] }, env);
+  assert.deepEqual(Object.keys(r.series).sort(), ["rain", "t", "ws"]);
+  assert.equal(r.series.t.kind, "temp");
+  assert.equal(r.series.t.step, 15 * MIN);
+  const rainTotal = r.series.rain.buckets.reduce((a, b) => a + b.sum, 0);
+  assert.ok(Math.abs(rainTotal - 4) < 0.01);
+  assert.ok(r.series.ws.buckets.every((b) => b.avg === 14.4));
+});
+
+test("history: refuses ranges over a year and unknown sensors", async () => {
+  await assert.rejects(homeHistory({ from: 0, to: 500 * 24 * HOUR, ids: ["t"] }, env), /year/);
+  await assert.rejects(homeHistory({ from: now - HOUR, to: now, ids: ["nope"] }, env), /aren't on this station/);
+});
+
+test("bucket: days start at local midnight", () => {
+  const day = 24 * HOUR, mid = Date.UTC(2026, 6, 1);
+  const pts = [{ t: mid - 30 * MIN, v: 1 }, { t: mid + 30 * MIN, v: 3 }];
+  assert.equal(bucket(pts, day, 0).length, 2);
+  assert.equal(bucket(pts, day, 60 * MIN).length, 1); // UTC+1: both fall on 1 July
+});
+
+test("/api/home endpoint: off without a login, on with one", async () => {
+  const off = await (await worker.fetch(new Request("https://x/api/home?lat=51.5&lon=-0.1"), {}, {})).json();
+  assert.equal(off.enabled, false);
+  const on = await (await worker.fetch(new Request("https://x/api/home?lat=51.5&lon=-0.1"), env, {})).json();
+  assert.equal(on.enabled, true);
+  assert.equal(on.station.name, "Garden");
+  const h = await (await worker.fetch(new Request(`https://x/api/home/history?from=${now - HOUR}&to=${now}&ids=t`), env, {})).json();
+  assert.ok(h.series.t.buckets.length >= 3);
 });

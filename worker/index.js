@@ -11,6 +11,7 @@
 // `code` is one of: clear, partly, cloudy, fog, drizzle, rain, heavy-rain, sleet, snow, thunder.
 
 import { stationsNear } from "./stations.js";
+import { homeConfigured, homeNear, homeHistory } from "./home.js";
 
 const SOURCES = {
   openmeteo: { key: null, ttl: 900, fetch: openMeteo },
@@ -45,6 +46,8 @@ export default {
       }
       if (url.pathname === "/api/geocode") return json(await geocode(url.searchParams.get("q") || ""));
       if (url.pathname === "/api/stations") return await stations(url, env, ctx);
+      if (url.pathname === "/api/home") return await home(url, env, ctx);
+      if (url.pathname === "/api/home/history") return await homeRange(url, env, ctx);
       if (url.pathname === "/api/forecast") return await forecast(url, env, ctx);
       if (url.pathname.startsWith("/api/")) return json({ error: "Not found" }, 404);
     } catch (err) {
@@ -90,6 +93,49 @@ async function forecast(url, env, ctx) {
       headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": `public, max-age=${source.ttl}` },
     });
     const put = cache.put(cacheKey, toCache);
+    if (ctx && ctx.waitUntil) ctx.waitUntil(put);
+  }
+  return res;
+}
+
+// Your own station (see home.js). Answers quickly from a recent copy; `enabled: false` when
+// no CampbellON login is set.
+async function home(url, env, ctx) {
+  if (!homeConfigured(env)) return json({ enabled: false });
+  const lat = Number(url.searchParams.get("lat"));
+  const lon = Number(url.searchParams.get("lon"));
+  if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return json({ error: "Bad coordinates" }, 400);
+  try {
+    return json({ enabled: true, ...(await homeNear({ lat, lon }, env, ctx)) });
+  } catch (err) {
+    return json({ enabled: true, error: String(err.message || err) }, 502);
+  }
+}
+
+async function homeRange(url, env, ctx) {
+  if (!homeConfigured(env)) return json({ error: "No CampbellON login set" }, 400);
+  const q = url.searchParams;
+  const from = Number(q.get("from")), to = Number(q.get("to")), offset = Number(q.get("offset") || 0);
+  const ids = (q.get("ids") || "").split(",").filter(Boolean);
+  // A range that ended over an hour ago won't change, so it can be kept for a day.
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const key = new Request(`https://cache.weather/home-range/${ids.join(",")}/${from}/${to}/${offset}`);
+  if (cache) {
+    const hit = await cache.match(key);
+    if (hit) return hit;
+  }
+  let body;
+  try {
+    body = await homeHistory({ from, to, ids, offset }, env, ctx);
+  } catch (err) {
+    return json({ error: String(err.message || err) }, 400);
+  }
+  const ttl = Date.now() - to > 3600e3 ? 86400 : 600;
+  const res = new Response(JSON.stringify(body), {
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": `public, max-age=${ttl}` },
+  });
+  if (cache) {
+    const put = cache.put(key, res.clone());
     if (ctx && ctx.waitUntil) ctx.waitUntil(put);
   }
   return res;
