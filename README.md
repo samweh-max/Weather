@@ -36,6 +36,9 @@ The blending code is in `public/blend.js` and runs on the phone. Past forecasts 
 | Airport reports (METAR, aviationweather.gov) | About 60 UK airports, every 30 minutes | None |
 | Environment Agency rain gauges | About 1,000 gauges in England, every 15 minutes | None |
 | Met Office land observations | About 150 official stations, hourly | Free DataHub "Land Observations" subscription (`METOFFICE_OBS_KEY`; falls back to `METOFFICE_KEY`) |
+| My station (CampbellON) | Your own Campbell Scientific station, shown when within 80 km | A CampbellON login (see below) |
+
+**My station.** Your own station is read from [CampbellON](https://campbellon.com/docs/) and shown as its own card at the top of Stations and as a highlighted marker on the map. It counts twice as much as an official station in the "measured now" nudge, its rain gauge joins the rain checks, and when it is within 15 km it replaces the nearest airport as the record each source's past forecasts are checked against. Set `CAMPBELL_STATION_ID` in `wrangler.toml` (already set), then add a login as secrets: a service account is best (`CAMPBELL_CLIENT_ID` and `CAMPBELL_CLIENT_SECRET`, made under Settings → Service accounts on CampbellON, with read access to the station), or your own `CAMPBELL_USERNAME` and `CAMPBELL_PASSWORD` (doesn't work if your organisation uses single sign-on). The organisation is found automatically; set `CAMPBELL_ORG_ID` to skip that. CampbellON allows about 200 calls an hour, so readings are cached for 5 minutes and the 24-hour track for 15. Sensors are recognised by their logger field names (AirTC_Avg, RH, WS_ms_S_WVT, WindDir, Rain_mm_Tot, BP_mbar and similar); every sensor is listed under "All sensors" either way.
 
 Not included: Met Office WOW and Weather Underground have no public read API, and Scotland's (SEPA) and Wales's (NRW) rain gauges need their own registrations. These could be added later.
 
@@ -69,6 +72,9 @@ npx wrangler secret put ACCUWEATHER_KEY
 npx wrangler secret put OPENWEATHER_KEY
 # optional, for more stations:
 npx wrangler secret put METOFFICE_OBS_KEY
+# optional, your own CampbellON station (a service account, or CAMPBELL_USERNAME + CAMPBELL_PASSWORD):
+npx wrangler secret put CAMPBELL_CLIENT_ID
+npx wrangler secret put CAMPBELL_CLIENT_SECRET
 npm run deploy
 ```
 

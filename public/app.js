@@ -1364,6 +1364,7 @@ function initChartScrub() {
 // ---------- Stations page ----------
 
 const NETWORKS = {
+  home: ["My station", "Your own weather station on CampbellON"],
   airport: ["Airports", "Official reports from UK airports, every 30 minutes"],
   metoffice: ["Met Office stations", "Hourly readings from about 150 official sites"],
   raingauge: ["Rain gauges", "Environment Agency gauges, every 15 minutes (England)"],
@@ -1406,14 +1407,19 @@ function renderStationsPage() {
   }
   const nets = Object.entries(NETWORKS).map(([id, [name]]) => {
     const n = (st.networks || {})[id] || {};
-    const status = !n.enabled ? ["", "needs a free key"]
-      : n.ok ? ["ok", `${n.count} nearby`] : ["bad", n.error || "not responding"];
+    const status = !n.enabled ? ["", id === "home" ? "add your CampbellON login" : "needs a free key"]
+      : !n.ok ? ["bad", n.error || "not responding"]
+      : id === "home" ? (n.count ? ["ok", "live"] : ["", n.far != null ? `${fmt.dist(n.far)} away` : "no readings"])
+      : ["ok", `${n.count} nearby`];
     return `<div class="net"><span>${name}</span><span class="st ${status[0]}">${esc(status[1])}</span></div>`;
   }).join("");
   let groups = "";
+  const mine = (st.stations || []).find((s) => s.network === "home");
+  const key = $("#keyMine");
+  if (key) key.hidden = !mine;
   for (const [id, [name, lead]] of Object.entries(NETWORKS)) {
     const list = (st.stations || []).filter((s) => s.network === id);
-    if (!list.length) continue;
+    if (!list.length || id === "home") continue;
     const rows = list.map((s) => {
       if (s.network === "raingauge") return gaugeRow(s);
       const rain = s.rain1h != null ? (s.rain1h > 0 ? `<span class="r">${fmt.rain(s.rain1h)}/h</span>` : `<span class="r dry">dry</span>`)
@@ -1423,11 +1429,32 @@ function renderStationsPage() {
     }).join("");
     groups += `<section class="panel"><h2>${name}</h2>${rows}</section>`;
   }
-  box.innerHTML = `<section class="panel"><h2>Station networks</h2><div class="nets">${nets}</div></section>${groups ||
+  box.innerHTML = `${mine ? homeCard(mine) : ""}<section class="panel"><h2>Station networks</h2><div class="nets">${nets}</div></section>${groups ||
     `<section class="panel"><p class="lead">No stations reported near here in the last few hours.</p></section>`}`;
   box.querySelectorAll(".srow.gauge").forEach((b) => {
     b.onclick = () => { state.openGauge = state.openGauge === b.dataset.id ? null : b.dataset.id; renderStationsPage(); };
   });
+}
+
+// Your own station: everything it measures now, its rain over the last day, and every sensor.
+function homeCard(s) {
+  const cell = (label, value, extra = "") => value == null ? "" : `<div class="mc"><small>${label}</small><b>${value}</b>${extra ? `<small>${extra}</small>` : ""}</div>`;
+  const wind = s.wind != null ? `<span class="mw">${windArrow(s.dir, "")}${fmt.windNum(s.wind)}</span>` : null;
+  const rain = s.rain1h != null ? (s.rain1h > 0 ? fmt.rain(s.rain1h) : "dry") : s.raining != null ? (s.raining ? "yes" : "dry") : null;
+  const cells = [
+    cell("Wind", wind, s.wind != null ? `${fmt.windUnit()}${s.dir != null ? " from " + compass(s.dir) : ""}${s.gust != null ? ` · gusts ${fmt.windNum(s.gust)}` : ""}` : ""),
+    cell("Rain", rain, s.rain24h != null ? `${s.rain24h > 0 ? fmt.rain(s.rain24h) : "dry"} in 24 h` : "last hour"),
+    cell("Humidity", s.humidity != null ? Math.round(s.humidity) + "%" : null),
+    cell("Pressure", s.pressure != null ? Math.round(s.pressure) : null, s.pressure != null ? "hPa" : ""),
+  ].join("");
+  const all = (s.readings || []).map((r) => `<tr><td>${esc(r.field)}</td><td>${esc(String(Math.round(r.value * 100) / 100))}${r.unit ? " " + esc(r.unit) : ""}</td></tr>`).join("");
+  return `<section class="panel mine-card">
+    <div class="mine-head"><div><span class="tag">My station</span><h2>${esc(s.name)}</h2><small>${s.dist >= 0.5 ? fmt.dist(s.dist) + " · " : ""}${ago(s.time)}</small></div>
+      <span class="mine-t">${s.temp != null ? fmt.temp(s.temp) : "–"}</span></div>
+    <div class="mine-grid">${cells}</div>
+    ${s.hourly ? `<div class="gdetail">${rainTimeline(s.hourly)}</div>` : ""}
+    ${all ? `<details class="mine-all"><summary>All sensors</summary><table>${all}</table></details>` : ""}
+  </section>`;
 }
 
 // A rain gauge: how much has fallen, and a 24-hour timeline when tapped.
@@ -1681,6 +1708,8 @@ function demoStations(lat, lon) {
     s({ id: "EGGW", network: "airport", name: london ? "Luton" : "Airport north", ...at(-15, 42), time: t(14), temp: 10.1, wind: 30, gust: 44, dir: 240, raining: true, wx: "light rain", pressure: 1005, cover: "OVC", elev: 160 }),
     s({ id: "MO-1", network: "metoffice", name: london ? "London St James's Park" : "Met Office station", ...at(-0.8, -0.9), time: t(31), temp: 11.9, humidity: 91, wind: 17, gust: 33, dir: 225, raining: true, pressure: 1006, elev: 5 }),
   ];
+  list.push(s({ id: "CC-demo", network: "home", mine: true, name: "Home", ...at(0.4, 0.3), time: t(4), temp: 11.8, humidity: 89, wind: 14, gust: 29, dir: 228, rain1h: 0.6, raining: true, pressure: 1006.4, elev: 20,
+    ...demoGauge(1, true), readings: [{ field: "AirTC_Avg", value: 11.8, unit: "Deg C" }, { field: "RH", value: 89, unit: "%" }, { field: "WS_ms_S_WVT", value: 3.9, unit: "meters/second" }, { field: "BattV_Min", value: 12.7, unit: "Volts" }] }));
   for (let i = 0; i < 7; i++) {
     const dx = (rnd(i + 200) - 0.5) * 40, dy = (rnd(i + 300) - 0.5) * 34;
     const wet = dx < 6;
@@ -1694,7 +1723,7 @@ function demoStations(lat, lon) {
   const count = (n) => list.filter((x) => x.network === n).length;
   return {
     stations: list, history, fetchedAt: new Date().toISOString(),
-    networks: Object.fromEntries(["airport", "metoffice", "raingauge"].map((n) => [n, { enabled: true, ok: true, count: count(n) }])),
+    networks: Object.fromEntries(["home", "airport", "metoffice", "raingauge"].map((n) => [n, { enabled: true, ok: true, count: count(n) }])),
   };
 }
 
