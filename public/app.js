@@ -1915,6 +1915,12 @@ function demoHome(lat, lon) {
     r("wd", "WindDir_D1_WVT", 228, "degrees", "dir", true), r("wdsd", "WindDir_SD1_WVT", 18, "degrees", null), r("rain", "Rain_mm_Tot", 0.2, "mm", "rain", true),
     r("bp", "BP_mbar_Avg", 1006.4, "mbar", "pressure", true), r("slr", "SlrW_Avg", 42, "W/m^2", null), r("slrmj", "SlrMJ_Tot", 0.04, "MJ/m^2", null),
     r("dew", "DewPtC", 10.1, "Deg C", null), r("batt", "BattV_Min", 12.7, "Volts", null), r("pt", "PTemp_C", 13.2, "Deg C", null),
+    r("rec", "record", 3077, "", null), r("wsdiag", "WSDiag", 0, "", null),
+    // The logger's own report, as a CR1000X sends it.
+    ...[["sbatt", "Battery", 13.06, "Volts"], ["slith", "LithiumBattery", 3.2, "Volts"], ["spt", "PanelTemp", 9.2, "Deg C"], ["serr", "ProgErrors", 0, ""],
+      ["soob", "VarOutOfBound", 0, ""], ["sskip", "SkippedScan", 0, ""], ["sdsf", "DataStorageFree", 8192, ""], ["scpu", "CPUDriveFree", 51124000, ""],
+      ["smem", "MemoryFree", 7661440, ""], ["smt", "MeasureTime", 103800, ""], ["spt2", "ProcessTime", 1247296, ""], ["smpt", "MaxProcTime", 1321224, ""],
+      ["sp1", "PortStatus(1)", 0, ""], ["ssw1", "SW12Volts(1)", 0, "Volts"]].map(([id, f, v, u]) => r(id, f, v, u, null, undefined, "Status")),
   ];
   const kmLat = 1 / 111, kmLon = 1 / (111 * Math.cos((lat * Math.PI) / 180));
   const station = { id: "CC-demo", network: "home", mine: true, name: "Home", lat: lat + 0.3 * kmLat, lon: lon + 0.4 * kmLon, time: t, temp: 11.8, humidity: 89, wind: 14, gust: 29, dir: 228, rain1h: 0.6, raining: true, pressure: 1006.4, elev: 20, sent: t, every: 3600e3, ...demoGauge(1, true), readings };
@@ -1934,7 +1940,7 @@ function demoHomeSeries(q, id) {
   const wave = (t) => Math.sin(((new Date(t).getHours() + new Date(t).getMinutes() / 60 - 9) / 24) * 2 * Math.PI);
   const season = (t) => 10 - 6 * Math.cos(((t / 864e5 - 15) / 365) * 2 * Math.PI);
   const noise = (t) => { const x = Math.sin(t / 3.7e6) * 43758.5453; return x - Math.floor(x); };
-  const base = { t: (x) => season(x) + 4 * wave(x), tmax: (x) => season(x) + 5 * wave(x), tmin: (x) => season(x) + 3 * wave(x), rh: (x) => 80 - 12 * wave(x), ws: (x) => (3 + 2 * Math.sin(x / 9e6) + noise(x)) * 3.6, wsmax: (x) => (6 + 3 * Math.sin(x / 9e6) + 2 * noise(x)) * 3.6, wd: (x) => (noise(x / 3) > 0.8 ? 20 + 80 * noise(x) : 205 + 50 * (noise(x) - 0.5) + 30 * Math.sin(x / 2e8) + 360) % 360, bp: (x) => 1010 + 8 * Math.sin(x / 2.6e8), rain: (x) => (noise(x * 1.3) > 0.86 ? noise(x) * 0.8 : 0), slr: (x) => Math.max(0, 300 * wave(x)) }[id] || ((x) => 12 + noise(x));
+  const base = { t: (x) => season(x) + 4 * wave(x), tmax: (x) => season(x) + 5 * wave(x), tmin: (x) => season(x) + 3 * wave(x), rh: (x) => 80 - 12 * wave(x), ws: (x) => (3 + 2 * Math.sin(x / 9e6) + noise(x)) * 3.6, wsmax: (x) => (6 + 3 * Math.sin(x / 9e6) + 2 * noise(x)) * 3.6, wd: (x) => (noise(x / 3) > 0.8 ? 20 + 80 * noise(x) : 205 + 50 * (noise(x) - 0.5) + 30 * Math.sin(x / 2e8) + 360) % 360, bp: (x) => 1010 + 8 * Math.sin(x / 2.6e8), sbatt: (x) => 12.9 + 0.35 * Math.max(0, wave(x)) - 0.1 * noise(x), rain: (x) => (noise(x * 1.3) > 0.86 ? noise(x) * 0.8 : 0), slr: (x) => Math.max(0, 300 * wave(x)) }[id] || ((x) => 12 + noise(x));
   const buckets = [];
   for (let t = Math.floor(from / step) * step; t < to; t += step) {
     if (noise(t * 7) > 0.985) continue; // the odd gap
